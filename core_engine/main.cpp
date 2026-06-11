@@ -31,8 +31,8 @@ BOOL WINAPI ConsoleHandler(DWORD signal) {
 }
 
 int main() {
-    SetConsoleOutputCP(CP_UTF8); // [안티그래비티 추가] 터미널 한글 깨짐 영구 방지
-    SetConsoleCP(CP_UTF8);       // [안티그래비티 추가] 터미널 한글 깨짐 영구 방지
+    SetConsoleOutputCP(CP_UTF8); //  터미널 한글 깨짐 영구 방지
+    SetConsoleCP(CP_UTF8);       // 터미널 한글 깨짐 영구 방지
 
     // ============================================================
     // 관리자 권한 필수 체크 (QUIC 차단 방화벽 추가를 위함)
