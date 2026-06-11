@@ -80,6 +80,7 @@ extern std::unordered_map<uint64_t, time_t> allowed_conns;
 extern std::unordered_map<uint64_t, time_t> pending_conns;
 extern std::vector<std::string> whitelist_domains;
 extern std::vector<std::string> blacklist_domains;
+extern std::vector<std::string> blacklist_process;
 extern PacketPool g_packet_pool;
 extern HANDLE g_hIocp;
 

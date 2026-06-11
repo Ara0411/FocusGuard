@@ -1,5 +1,6 @@
 #include "config.h"
 #include "packet_processor.h"
+#include "process_blocker.h"
 
 // 관리자 권한 확인 함수
 bool IsRunAsAdmin() {
@@ -173,7 +174,11 @@ int main() {
     std::thread watcher_thread(watcher_func);
     watcher_thread.detach();
 
-
+    // ============================================================
+    // App Blocker 스레드 기동 (프로세스 기반 앱 차단)
+    // ============================================================
+    std::thread process_thread(process_blocker_func);
+    process_thread.detach();
 
     std::cout << "네트워크 패킷 캡처를 시작합니다... (종료하려면 콘솔 창을 닫아주세요)\n" << std::endl;
 

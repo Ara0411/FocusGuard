@@ -82,6 +82,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>;$(ProjectDir)lib\x64;$(ProjectDir)lib</AdditionalLibraryDirectories>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -98,6 +99,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>;$(ProjectDir)lib\x64;$(ProjectDir)lib</AdditionalLibraryDirectories>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -114,6 +116,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>lib;$(ProjectDir)lib\x64;$(ProjectDir)lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>wpcap.lib;Packet.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -132,6 +135,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>lib;$(ProjectDir)lib\x64;$(ProjectDir)lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>wpcap.lib;Packet.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -139,12 +143,17 @@
     <ClCompile Include="config.cpp" />
     <ClCompile Include="packet_injector.cpp" />
     <ClCompile Include="packet_processor.cpp" />
+    <ClCompile Include="process_blocker.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="process_blocker.h" />
     <ClInclude Include="protocol_headers.h" />
     <ClInclude Include="config.h" />
     <ClInclude Include="packet_injector.h" />
     <ClInclude Include="packet_processor.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="whitelist.json" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

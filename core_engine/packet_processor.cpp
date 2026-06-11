@@ -77,7 +77,7 @@ void load_whitelist() {
             json data = json::parse(f);
             std::vector<std::string> new_wl;
             std::vector<std::string> new_bl;
-            
+            std::vector<std::string> new_bl_process;
             if (data.contains("allowed_domains")) {
                 for (auto& el : data["allowed_domains"]) {
                     new_wl.push_back(el.get<std::string>());
@@ -88,14 +88,20 @@ void load_whitelist() {
                     new_bl.push_back(el.get<std::string>());
                 }
             }
+            if (data.contains("blocked_process")) {
+                for (auto& el : data["blocked_process"]) {
+                    new_bl_process.push_back(el.get<std::string>());
+                }
+            }
             
             // 파싱이 성공적으로 끝난 뒤에만 원본 리스트를 교체 (안전한 업데이트)
             {
                 std::unique_lock<std::shared_mutex> lock(g_wl_mutex); // 리스트 보호용 뮤텍스 공용 사용
                 whitelist_domains = std::move(new_wl);
                 blacklist_domains = std::move(new_bl);
+                blacklist_process = std::move(new_bl_process);
             }
-            std::cout << "[Info] 필터 로드 완료: 허용 " << whitelist_domains.size() << "개 / 차단 " << blacklist_domains.size() << "개 " << std::endl;
+            std::cout << "[Info] 필터 로드 완료: 허용 " << whitelist_domains.size() << "개 / 도메인 차단 " << blacklist_domains.size() << "개 / 앱 차단 " << blacklist_process.size() << "개" << std::endl;
         } else {
             std::cerr << "[Warning] whitelist.json 파일을 찾을 수 없습니다. 모든 통신이 차단될 수 있습니다. " << std::endl;
         }

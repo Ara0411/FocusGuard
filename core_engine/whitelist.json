@@ -1,27 +1,30 @@
 {
-    "allowed_domains": [
-        "github.com",
-        "googleapis.com",
-        "google.com",
-        "gstatic.com",
-        "vscode.dev",
-        "windowsupdate.com",
-        "microsoft.com",
-        "update.microsoft.com",
-        "ubuntu.com",
-        "debian.org",
-        "kernel.org",
-        "linux.org",
-        "dns.google"
-    ],
-    "blocked_domains": [
-        "youtube.com",
-        "youtu.be",
-        "googlevideo.com",
-        "ytimg.com",
-        "ggpht.com",
-        "facebook.com",
-        "http://lol.secure.dyn.riotcdn.net/",
-        "serv.ds.kakao.com"
-    ]
+  "allowed_domains": [
+    "github.com",
+    "googleapis.com",
+    "google.com",
+    "gstatic.com",
+    "vscode.dev",
+    "windowsupdate.com",
+    "microsoft.com",
+    "update.microsoft.com",
+    "ubuntu.com",
+    "debian.org",
+    "kernel.org",
+    "linux.org",
+    "dns.google"
+  ],
+  "blocked_domains": [
+    "youtube.com",
+    "youtu.be",
+    "googlevideo.com",
+    "ytimg.com",
+    "ggpht.com",
+    "facebook.com",
+    "serv.ds.kakao.com"
+  ],
+  "blocked_process": [
+    "notepad.exe",
+    "kakaotalk.exe"
+  ]
 }

@@ -27,6 +27,9 @@
     <ClCompile Include="packet_processor.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="process_blocker.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="protocol_headers.h">
@@ -41,5 +44,13 @@
     <ClInclude Include="packet_processor.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="process_blocker.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="whitelist.json">
+      <Filter>리소스 파일</Filter>
+    </None>
   </ItemGroup>
 </Project>
