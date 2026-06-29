@@ -12,7 +12,9 @@
     "debian.org",
     "kernel.org",
     "linux.org",
-    "dns.google"
+    "dns.google",
+    "eclass.yuhan.ac.kr",
+    "notebooklm.google"
   ],
   "blocked_domains": [
     "youtube.com",

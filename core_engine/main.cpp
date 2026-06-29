@@ -117,7 +117,7 @@ int main() {
     // 3. 어댑터 열기 (캡처 시작)
     pcap_t* adhandle = pcap_open_live(
         target_dev->name,   // 장치 이름
-        65536,              // 패킷 최대 길이
+        1500,               // 패킷 최대 길이 (MTU 사이즈 슬라이싱으로 메모리/CPU 최적화)
         1,                  // Promiscuous 모드 (모든 패킷 캡처)
         1,                  // 읽기 타임아웃 (1000ms -> 1ms로 줄여서 RST 발사 지연 완벽 방지)
         errbuf              // 에러 버퍼
