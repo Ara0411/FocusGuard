@@ -1,5 +1,6 @@
 #include "config.h"
 #include "packet_processor.h"
+#include "process_blocker.h"
 
 // 관리자 권한 확인 함수
 bool IsRunAsAdmin() {
@@ -31,8 +32,8 @@ BOOL WINAPI ConsoleHandler(DWORD signal) {
 }
 
 int main() {
-    SetConsoleOutputCP(CP_UTF8); // [안티그래비티 추가] 터미널 한글 깨짐 영구 방지
-    SetConsoleCP(CP_UTF8);       // [안티그래비티 추가] 터미널 한글 깨짐 영구 방지
+    SetConsoleOutputCP(CP_UTF8); //  터미널 한글 깨짐 영구 방지
+    SetConsoleCP(CP_UTF8);       // 터미널 한글 깨짐 영구 방지
 
     // ============================================================
     // 관리자 권한 필수 체크 (QUIC 차단 방화벽 추가를 위함)
@@ -116,7 +117,7 @@ int main() {
     // 3. 어댑터 열기 (캡처 시작)
     pcap_t* adhandle = pcap_open_live(
         target_dev->name,   // 장치 이름
-        65536,              // 패킷 최대 길이
+        1500,               // 패킷 최대 길이 (MTU 사이즈 슬라이싱으로 메모리/CPU 최적화)
         1,                  // Promiscuous 모드 (모든 패킷 캡처)
         1,                  // 읽기 타임아웃 (1000ms -> 1ms로 줄여서 RST 발사 지연 완벽 방지)
         errbuf              // 에러 버퍼
@@ -173,7 +174,11 @@ int main() {
     std::thread watcher_thread(watcher_func);
     watcher_thread.detach();
 
-
+    // ============================================================
+    // App Blocker 스레드 기동 (프로세스 기반 앱 차단)
+    // ============================================================
+    std::thread process_thread(process_blocker_func);
+    process_thread.detach();
 
     std::cout << "네트워크 패킷 캡처를 시작합니다... (종료하려면 콘솔 창을 닫아주세요)\n" << std::endl;
 

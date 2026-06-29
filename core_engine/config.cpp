@@ -8,6 +8,7 @@ std::unordered_map<uint64_t, time_t> allowed_conns;
 std::unordered_map<uint64_t, time_t> pending_conns;
 std::vector<std::string> whitelist_domains;
 std::vector<std::string> blacklist_domains;
+std::vector<std::string> blacklist_process;
 PacketPool g_packet_pool;
 HANDLE g_hIocp;
 

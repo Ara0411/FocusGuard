@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <iostream>
 #include <string>
 #include <winsock2.h>
@@ -34,7 +34,9 @@ struct CapturedPacket : public OVERLAPPED {
     void SetData(const struct pcap_pkthdr* hdr, const u_char* pkt_data) {
         memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
         header = *hdr;
-        raw_data.assign(pkt_data, pkt_data + hdr->caplen);
+        // MTU 사이즈(1500) 초과 데이터는 잘라내어 메모리 복사 부하 최소화
+        int copy_len = (hdr->caplen > 1500) ? 1500 : hdr->caplen;
+        raw_data.assign(pkt_data, pkt_data + copy_len);
     }
 };
 
@@ -80,6 +82,7 @@ extern std::unordered_map<uint64_t, time_t> allowed_conns;
 extern std::unordered_map<uint64_t, time_t> pending_conns;
 extern std::vector<std::string> whitelist_domains;
 extern std::vector<std::string> blacklist_domains;
+extern std::vector<std::string> blacklist_process;
 extern PacketPool g_packet_pool;
 extern HANDLE g_hIocp;
 
