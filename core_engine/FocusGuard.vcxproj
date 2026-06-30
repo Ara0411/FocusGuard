@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -144,6 +144,7 @@
     <ClCompile Include="packet_injector.cpp" />
     <ClCompile Include="packet_processor.cpp" />
     <ClCompile Include="process_blocker.cpp" />
+    <ClCompile Include="stats_logger.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="process_blocker.h" />
@@ -151,8 +152,10 @@
     <ClInclude Include="config.h" />
     <ClInclude Include="packet_injector.h" />
     <ClInclude Include="packet_processor.h" />
+    <ClInclude Include="stats_logger.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="FocusGuard_stats.json" />
     <None Include="whitelist.json" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

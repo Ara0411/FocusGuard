@@ -1,0 +1,43 @@
+{
+    "first_block_time": 1782827780,
+    "focus_score_percent": 41.379310344827594,
+    "raw_stats": {
+        "blocked_connections": 34,
+        "killed_processes": 0,
+        "normal_connections": 24
+    },
+    "start_time": 1782827749,
+    "timeline_24h": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        29
+    ],
+    "top_blocked_domains": {
+        "autopatch.juno.ea.com": 1,
+        "default.exp-tas.com": 1,
+        "google.com": 11,
+        "ratt.juno.ea.com": 1,
+        "spotify.com": 19
+    }
+}

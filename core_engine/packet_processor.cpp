@@ -1,4 +1,5 @@
 #include "packet_processor.h"
+#include "stats_logger.h"
 
 // HTTP Host 추출 함수
 std::string extract_http_host(const u_char* payload, int payload_len) {
@@ -321,6 +322,7 @@ void consumer_func(pcap_t* adhandle) {
                             pending_conns.erase(conn_id);
                             blocked_conns[conn_id] = time(nullptr);
                             std::cout << "\n[Thread " << std::this_thread::get_id() << "] [BLACKLIST HIT] ⛔ 명시적 차단 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                            StatsLogger::GetInstance().LogBlockedConnection(domain);
                         }
                     }
                     send_spoofed_rst_packet(adhandle, pkt_data, header->caplen, domain);
@@ -332,6 +334,7 @@ void consumer_func(pcap_t* adhandle) {
                         pending_conns.erase(conn_id); // pending에서 제거
                         allowed_conns[conn_id] = time(nullptr); // 허용 시각 저장
                         std::cout << "\n[Thread " << std::this_thread::get_id() << "] [Whitelist] ✅ OK 허용 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                        StatsLogger::GetInstance().LogNormalConnection();
                     }
                 } else {
                     // ── 화이트리스트에 없는 미등록 도메인 처리 ──
@@ -349,6 +352,7 @@ void consumer_func(pcap_t* adhandle) {
                                 pending_conns.erase(conn_id); // pending에서 제거
                                 blocked_conns[conn_id] = time(nullptr); // 차단 시각 저장
                                 std::cout << "\n[Thread " << std::this_thread::get_id() << "] [Unknown] ❌ 미등록 차단 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                                StatsLogger::GetInstance().LogBlockedConnection(domain);
                             }
                         } // g_ip_mutex 해제 후 RST 발사
                         send_spoofed_rst_packet(adhandle, pkt_data, header->caplen, domain);
@@ -359,6 +363,7 @@ void consumer_func(pcap_t* adhandle) {
                             pending_conns.erase(conn_id);
                             allowed_conns[conn_id] = time(nullptr);
                             // 너무 많은 로그 출력을 방지하기 위해 콘솔 출력 생략
+                            StatsLogger::GetInstance().LogNormalConnection();
                         }
                     }
                 }
@@ -438,5 +443,8 @@ void watcher_func() {
                 else ++it;
             }
         }
+        
+        // 3. 통계 데이터 JSON 저장 (UI 렌더링용)
+        StatsLogger::GetInstance().SaveToFile("FocusGuard_stats.json");
     }
 }

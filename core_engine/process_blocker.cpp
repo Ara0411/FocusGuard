@@ -1,4 +1,5 @@
 #include "process_blocker.h"
+#include "stats_logger.h"
 
 // RAII 패턴을 적용한 안전한 핸들 관리 클래스
 struct AutoHandle {
@@ -66,6 +67,7 @@ void process_blocker_func()
                 if (hProcess != NULL) {
                     if (TerminateProcess(hProcess, 0)) {
                         std::cout << "\n[Process Block] ⛔ 블랙리스트 앱 차단됨: " << exeName << " (PID: " << pe32.th32ProcessID << ")" << std::endl;
+                        StatsLogger::GetInstance().LogProcessKilled(exeName);
                     }
                 }
             }
