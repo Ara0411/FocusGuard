@@ -67,3 +67,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# FocusGuard runtime generated & config files
+core_engine/FocusGuard_stats.json
+core_engine/whitelist.json

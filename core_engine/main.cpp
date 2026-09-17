@@ -1,6 +1,7 @@
 #include "config.h"
 #include "packet_processor.h"
 #include "process_blocker.h"
+#include "watcher.h"
 #include <windows.h>
 
 // 관리자 권한 확인 함수

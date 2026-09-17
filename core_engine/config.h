@@ -15,7 +15,10 @@
 #include <atomic>
 #include <deque>
 #include <condition_variable>
+#pragma warning(push)
+#pragma warning(disable: 26495) // nlohmann/json 외부 라이브러리 내부 공용체 경고 무시
 #include "json.hpp"
+#pragma warning(pop)
 
 using json = nlohmann::json;
 

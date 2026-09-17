@@ -33,6 +33,9 @@
     <ClCompile Include="stats_logger.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="watcher.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="protocol_headers.h">
@@ -53,10 +56,17 @@
     <ClInclude Include="stats_logger.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="watcher.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="whitelist.json">
       <Filter>리소스 파일</Filter>
     </None>
+    <None Include="whitelist.example.json">
+      <Filter>리소스 파일</Filter>
+    </None>
+    <None Include="FocusGuard_stats.json" />
   </ItemGroup>
 </Project>
