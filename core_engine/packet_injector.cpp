@@ -1,9 +1,9 @@
 #include "packet_injector.h"
 
+//인터넷 체크섬
 unsigned short calculate_checksum(unsigned short* ptr, int nbytes) {
-    long sum = 0;
-    short answer = 0;
-    short oddbyte = 0;
+    uint32_t sum = 0;
+    uint16_t oddbyte = 0;
 
     while (nbytes > 1) {
         sum += *ptr++;
@@ -15,20 +15,29 @@ unsigned short calculate_checksum(unsigned short* ptr, int nbytes) {
         sum += oddbyte;
     }
 
-    sum = (sum >> 16) + (sum & 0xffff);
-    sum += (sum >> 16);
-    answer = (short)~sum;
-    return answer;
+    while (sum >> 16) {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    return (uint16_t)(~sum);
 }
 
-// TCP RST 패킷 위조 및 주입 함수
-void send_spoofed_rst_packet(pcap_t* adhandle, const u_char* orig_pkt, int caplen, const std::string& domain) {
+// TCP RST 패킷 위조 및 아웃바운드 큐 등록 함수
+void queue_spoofed_rst_packet(const u_char* orig_pkt, int caplen, const std::string& domain) {
+    if (!orig_pkt) return;
+    
+    // 최소 길이 검증: Ethernet(14) + IP(20) + TCP(20) = 54바이트
+    int min_hdr_len = sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header) + sizeof(struct pkt_tcp_header);
+    if (caplen < min_hdr_len) return;
+
     // 1. 원본 패킷 구조체 매핑
     struct pkt_eth_header* orig_eth = (struct pkt_eth_header*)orig_pkt;
     struct pkt_ip_header* orig_ip = (struct pkt_ip_header*)(orig_pkt + sizeof(struct pkt_eth_header));
     int ip_len = (orig_ip->ver_ihl & 0xf) * 4;
+    if (ip_len < 20 || caplen < (int)(sizeof(struct pkt_eth_header) + ip_len + sizeof(struct pkt_tcp_header))) return;
+
     struct pkt_tcp_header* orig_tcp = (struct pkt_tcp_header*)((u_char*)orig_ip + ip_len);
     int tcp_len = ((orig_tcp->data_offset >> 4) * 4);
+    if (tcp_len < 20 || caplen < (int)(sizeof(struct pkt_eth_header) + ip_len + tcp_len)) return;
 
     // 원본 패킷의 페이로드(데이터) 길이 계산
     int orig_payload_len = ntohs(orig_ip->tlen) - (ip_len + tcp_len);
@@ -136,25 +145,30 @@ void send_spoofed_rst_packet(pcap_t* adhandle, const u_char* orig_pkt, int caple
     tcp_bwd->checksum = 0;
     tcp_bwd->checksum = calculate_checksum((unsigned short*)pseudogram_bwd, psize);
 
-    // 3. 만들어진 양방향 RST 패킷 전송
-    pcap_sendpacket(adhandle, spoofed_pkt_fwd, spoofed_pkt_len);
-    pcap_sendpacket(adhandle, spoofed_pkt_bwd, spoofed_pkt_len);
-
-    //std::cout << "[Phase 5] 접속 차단(RST 주입) 완료: " << domain << std::endl;
-
+    // 3. 아웃바운드 송신 큐에 패킷 푸시
+    g_outbound_queue.Push(RawPacket(spoofed_pkt_fwd, spoofed_pkt_len));
+    g_outbound_queue.Push(RawPacket(spoofed_pkt_bwd, spoofed_pkt_len));
 }
 
-// ICMP Destination Unreachable (Port Unreachable) 패킷 위조 및 주입 함수
-void send_spoofed_icmp_unreachable(pcap_t* adhandle, const u_char* orig_pkt) {
+// ICMP Destination Unreachable 패킷 위조 및 아웃바운드 큐 등록 함수
+void queue_spoofed_icmp_unreachable(const u_char* orig_pkt, int caplen) {
+    if (!orig_pkt) return;
+    
+    int min_len = sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header) + 8;
+    if (caplen < min_len) return;
+
     struct pkt_eth_header* orig_eth = (struct pkt_eth_header*)orig_pkt;
     struct pkt_ip_header* orig_ip = (struct pkt_ip_header*)(orig_pkt + sizeof(struct pkt_eth_header));
     int orig_ip_len = (orig_ip->ver_ihl & 0xf) * 4;
+    if (orig_ip_len < 20 || caplen < (int)(sizeof(struct pkt_eth_header) + orig_ip_len + 8)) return;
     
     // 원본 IP 헤더 + 처음 8바이트 데이터(UDP 헤더) 크기 계산
     int icmp_payload_len = orig_ip_len + 8;
     
     // 2. 가짜 패킷(ICMP) 메모리 할당
     int spoofed_pkt_len = sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header) + sizeof(struct pkt_icmp_header) + icmp_payload_len;
+    if (spoofed_pkt_len > 256) return; // 위조한 패킷의 크기가 비정상적으로 큰 경우에 그냥 패킷 전송하지 않고 넘어감(프로그램 죽는거 방지용)
+    
     u_char spoofed_pkt_bwd[256] = {0}; // 서버->클라이언트로 위장하여 전송
 
     struct pkt_eth_header* eth_bwd = (struct pkt_eth_header*)spoofed_pkt_bwd;
@@ -162,14 +176,14 @@ void send_spoofed_icmp_unreachable(pcap_t* adhandle, const u_char* orig_pkt) {
     struct pkt_icmp_header* icmp_bwd = (struct pkt_icmp_header*)(spoofed_pkt_bwd + sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header));
     u_char* icmp_payload = spoofed_pkt_bwd + sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header) + sizeof(struct pkt_icmp_header);
 
-    // [역방향 ICMP] 내가 서버인 척하고 클라이언트에게 도달 불가 메시 전송
+    // [역방향 ICMP] 내가 서버인 척하고 클라이언트에게 도달 불가 메시지 전송
     memcpy(&eth_bwd->src_mac, &orig_eth->src_mac, 6); // 본인 MAC 유지 (Hairpinning)
     memcpy(&eth_bwd->dest_mac, &orig_eth->src_mac, 6);
     eth_bwd->eth_type = orig_eth->eth_type;
 
     ip_bwd->ver_ihl = 0x45;
     ip_bwd->tos = 0;
-    ip_bwd->tlen = htons(sizeof(struct pkt_ip_header) + sizeof(struct pkt_icmp_header) + icmp_payload_len);
+    ip_bwd->tlen = htons((u_short)(sizeof(struct pkt_ip_header) + sizeof(struct pkt_icmp_header) + icmp_payload_len));
     ip_bwd->identification = htons(12346);
     ip_bwd->flags_fo = 0;
     ip_bwd->ttl = 64;
@@ -191,5 +205,32 @@ void send_spoofed_icmp_unreachable(pcap_t* adhandle, const u_char* orig_pkt) {
     // ICMP 체크섬 계산
     icmp_bwd->checksum = calculate_checksum((unsigned short*)icmp_bwd, sizeof(struct pkt_icmp_header) + icmp_payload_len);
 
-    pcap_sendpacket(adhandle, spoofed_pkt_bwd, spoofed_pkt_len);
+    // 아웃바운드 송신 큐에 푸시
+    g_outbound_queue.Push(RawPacket(spoofed_pkt_bwd, spoofed_pkt_len));
+}
+
+// packet_sender_func: 위조 패킷 송신 스레드
+//
+// 아웃바운드 큐(g_outbound_queue)에서 위조 패킷을 꺼내
+// pcap_sendpacket()을 호출하여 위조 패킷을 송신합니다
+// 이 스레드는 하나만 생성합니다.
+
+void packet_sender_func(pcap_t* adhandle) {
+    std::cout << "[Packet Sender] 아웃바운드 패킷 전송 스레드가 기동되었습니다." << std::endl;
+    RawPacket pkt;
+    while (g_outbound_queue.Pop(pkt)) {
+        if (adhandle != NULL && pkt.len > 0) {
+            pcap_sendpacket(adhandle, pkt.data, pkt.len);
+        }
+    }
+    std::cout << "[Packet Sender] 아웃바운드 패킷 전송 스레드가 종료되었습니다." << std::endl;
+}
+
+// 하위 호환용 래퍼 함수(기존 rst패킷 전송 함수를 호출하면 아웃바운드 큐에 패킷을 넣도록 해주는 함수입니다)
+void send_spoofed_rst_packet(pcap_t* /*adhandle*/, const u_char* orig_pkt, int caplen, const std::string& domain) {
+    queue_spoofed_rst_packet(orig_pkt, caplen, domain);
+}
+
+void send_spoofed_icmp_unreachable(pcap_t* /*adhandle*/, const u_char* orig_pkt) {
+    queue_spoofed_icmp_unreachable(orig_pkt, 1500);
 }

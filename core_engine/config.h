@@ -13,7 +13,12 @@
 #include <sys/stat.h>
 #include <ctime>
 #include <atomic>
+#include <deque>
+#include <condition_variable>
+#pragma warning(push)
+#pragma warning(disable: 26495) // nlohmann/json 외부 라이브러리 내부 공용체 경고 무시
 #include "json.hpp"
+#pragma warning(pop)
 
 using json = nlohmann::json;
 
@@ -74,6 +79,67 @@ public:
     }
 };
 
+//위조 패킷을 담아 둘 구조체
+struct RawPacket {
+    int len{ 0 };
+    u_char data[256]{};
+
+    RawPacket() : len(0), data{} {
+        memset(data, 0, sizeof(data));
+    }
+
+    RawPacket(const u_char* p_data, int p_len) : len(p_len), data{} {
+        if (len > 256) len = 256;
+        if (len < 0) len = 0;
+        if (p_data && len > 0) {
+            memcpy(data, p_data, len);
+        }
+    }
+};
+
+//RawPacket을 담아 둘 아웃바운드큐
+class PacketTxQueue {
+private:
+    std::deque<RawPacket> queue_;
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::atomic<bool> stopped_{false};
+    size_t max_capacity_;
+
+public:
+    PacketTxQueue(size_t max_capacity = 4096) : max_capacity_(max_capacity) {}
+
+    void Push(const RawPacket& pkt) {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (queue_.size() >= max_capacity_) {
+                queue_.pop_front(); // 버스트 시 오래된 패킷 드랍하여 지연 방지
+            }
+            queue_.push_back(pkt);
+        }
+        cv_.notify_one();
+    }
+
+    bool Pop(RawPacket& out_pkt) {
+        std::unique_lock<std::mutex> lock(mtx_);
+        cv_.wait(lock, [this]() { return !queue_.empty() || stopped_.load(); });
+        if (stopped_.load() && queue_.empty()) return false;
+        out_pkt = queue_.front();
+        queue_.pop_front();
+        return true;
+    }
+
+    void Stop() {
+        stopped_.store(true);
+        cv_.notify_all();
+    }
+
+    size_t Size() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return queue_.size();
+    }
+};
+
 extern std::atomic<uint64_t> total_captured_cnt;
 extern std::shared_mutex g_ip_mutex;
 extern std::shared_mutex g_wl_mutex;
@@ -85,4 +151,4 @@ extern std::vector<std::string> blacklist_domains;
 extern std::vector<std::string> blacklist_process;
 extern PacketPool g_packet_pool;
 extern HANDLE g_hIocp;
-
+extern PacketTxQueue g_outbound_queue;

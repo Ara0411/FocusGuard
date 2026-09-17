@@ -1,6 +1,8 @@
 #include "config.h"
 #include "packet_processor.h"
 #include "process_blocker.h"
+#include "watcher.h"
+#include <windows.h>
 
 // 관리자 권한 확인 함수
 bool IsRunAsAdmin() {
@@ -31,6 +33,20 @@ BOOL WINAPI ConsoleHandler(DWORD signal) {
     return FALSE; // 기본 핸들러 실행 (프로그램 종료)
 }
 
+//콘솔창 마우스 클릭/드래그/스크롤 시 발생하는 출력 블로킹(스레드 멈춤) 방지 함수
+void DisableConsoleQuickEdit() {
+    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (hInput == INVALID_HANDLE_VALUE) return;
+
+    DWORD prev_mode;
+    if (GetConsoleMode(hInput, &prev_mode)) {
+        // ENABLE_QUICK_EDIT_MODE와 ENABLE_MOUSE_INPUT 비트를 해제
+        // 확장 플래그(ENABLE_EXTENDED_FLAGS)를 함께 넘겨야 QuickEdit 해제가 정상 적용됨
+        DWORD new_mode = (prev_mode & ~ENABLE_QUICK_EDIT_MODE & ~ENABLE_MOUSE_INPUT) | ENABLE_EXTENDED_FLAGS;
+        SetConsoleMode(hInput, new_mode);
+    }
+}
+
 int main() {
     SetConsoleOutputCP(CP_UTF8); //  터미널 한글 깨짐 영구 방지
     SetConsoleCP(CP_UTF8);       // 터미널 한글 깨짐 영구 방지
@@ -56,6 +72,8 @@ int main() {
     system("netsh advfirewall firewall add rule name=\"Block_QUIC_UDP443\" dir=out action=block protocol=UDP remoteport=443 >nul 2>&1");
     std::cout << "[Info] QUIC (UDP 443) 차단 방화벽 규칙을 적용했습니다." << std::endl;
 
+    //출력 블로킹(스레드 멈춤) 방지 함수 호출
+    DisableConsoleQuickEdit();
    
     pcap_if_t* alldevs;
     pcap_if_t* d;
@@ -138,9 +156,9 @@ int main() {
     // ============================================================
     // BPF(Berkeley Packet Filter) 설정
     // ============================================================
-    // 80, 443 포트와 관련된 TCP 트래픽 및 QUIC 트래픽(UDP 443) 수신하도록 커널 단 필터 적용
+    // 80, 443 포트와 관련된 TCP 트래픽, QUIC 트래픽(UDP 443), 및 DNS 질의(pc에서 나가는 패킷)것들만 수신하도록 설정
     struct bpf_program fcode;
-    const char* filter_exp = "tcp port 80 or tcp port 443 or udp port 443";
+    const char* filter_exp = "tcp port 80 or tcp port 443 or udp port 443 or (udp dst port 53)";
     if (pcap_compile(adhandle, &fcode, filter_exp, 1, PCAP_NETMASK_UNKNOWN) < 0) {
         std::cerr << "[Error] BPF 필터 컴파일 에러: " << pcap_geterr(adhandle) << std::endl;
     } else {
@@ -151,8 +169,16 @@ int main() {
         }
     }
 
+    
+    // 위조 패킷 발사 스레드 생성
+    //
+    // 워커 스레드들이 아웃바운드 큐(g_outbound_queue)에 넣은 위조 RST/ICMP 패킷을
+    // pcap_sendpacket()을 호출하여 발사 (경쟁 상태 방지)
+    std::thread sender_thread(packet_sender_func, adhandle);
+    sender_thread.detach();
+
     // ============================================================
-    // [IOCP] 초기화 및 스레드 풀(Consumer) 기동
+    // IOCP 초기화 및 워커 스레드 생성
     // ============================================================
     // 1. 전역 IOCP 큐 생성
     g_hIocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
@@ -161,30 +187,27 @@ int main() {
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4; // 코어 수를 못 가져올 경우 기본 4개
 
-    // 3. 코어 수만큼 Consumer 스레드 기동
+    // 3. 코어 수만큼 Consumer 스레드 생성
     for (unsigned int i = 0; i < num_threads; i++) {
         std::thread consumer_thread(consumer_func, adhandle);
         consumer_thread.detach();
     }
     std::cout << "[IOCP] " << num_threads << "개의 병렬 Worker 스레드가 기동되었습니다.\n" << std::endl;
 
-    // ============================================================
-    // Watcher 스레드 기동 (핫 리로드 및 메모리 누수 방지용 TTL 정리)
-    // ============================================================
-    std::thread watcher_thread(watcher_func);
-    watcher_thread.detach();
-
-    // ============================================================
-    // App Blocker 스레드 기동 (프로세스 기반 앱 차단)
-    // ============================================================
+    // 프로세스 차단 관리자 스레드 기동
     std::thread process_thread(process_blocker_func);
     process_thread.detach();
+
+    // whitelist.json 파일 변경 여부 확인 및 통계 스레드 기동 (핫 리로드 및 TTL 정리)
+    std::thread watcher_thread(watcher_func);
+    watcher_thread.detach();
 
     std::cout << "네트워크 패킷 캡처를 시작합니다... (종료하려면 콘솔 창을 닫아주세요)\n" << std::endl;
 
     // 4. 무한 루프로 패킷 캡처 수행 (packet_handler 호출)
     pcap_loop(adhandle, 0, packet_handler, (u_char*)adhandle);
 
+    g_outbound_queue.Stop();
     pcap_close(adhandle);
     return 0;
 }

@@ -1,4 +1,4 @@
-﻿#include "config.h"
+#include "config.h"
 
 std::atomic<uint64_t> total_captured_cnt(0);
 std::shared_mutex g_ip_mutex;
@@ -11,4 +11,4 @@ std::vector<std::string> blacklist_domains;
 std::vector<std::string> blacklist_process;
 PacketPool g_packet_pool;
 HANDLE g_hIocp;
-
+PacketTxQueue g_outbound_queue;
