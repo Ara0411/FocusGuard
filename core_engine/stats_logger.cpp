@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
+#include <deque>
 
 StatsLogger& StatsLogger::GetInstance() {
     static StatsLogger instance;
@@ -122,13 +123,24 @@ void StatsLogger::LogBlockedConnection(const std::string& domain) {
     
     conn_blocked_cnt_++;
     domain_block_counts_[root_domain]++;
+    
+    // 실시간 로그 큐에 추가 (최대 50개 유지)
+    recent_blocks_.push_front({now, root_domain});
+    if (recent_blocks_.size() > 50) {
+        recent_blocks_.pop_back();
+    }
+    
     RecordBlockTime();
 }
 
 void StatsLogger::LogProcessKilled(const std::string& exeName) {
     std::lock_guard<std::mutex> lock(mtx_);
     process_killed_cnt_++;
-    // exeName 은 추후 프로세스별 통계가 필요하면 기록할 수 있음
+    time_t now = time(nullptr);
+    recent_blocks_.push_front({now, "[APP] " + exeName});
+    if (recent_blocks_.size() > 50) {
+        recent_blocks_.pop_back();
+    }
     RecordBlockTime();
 }
 
@@ -162,6 +174,25 @@ void StatsLogger::SaveToFile(const std::string& filepath) {
         }
         j["top_blocked_domains"] = top_domains;
         
+        // Recent Logs (최대 50개, GUI 실시간 로그 표시용)
+        json recent_logs = json::array();
+        for (const auto& log : recent_blocks_) {
+            char time_buf[64];
+            struct tm timeinfo;
+#ifdef _WIN32
+            localtime_s(&timeinfo, &log.first);
+#else
+            localtime_r(&log.first, &timeinfo);
+#endif
+            strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &timeinfo);
+            
+            json log_obj;
+            log_obj["time"] = std::string(time_buf);
+            log_obj["domain"] = log.second;
+            recent_logs.push_back(log_obj);
+        }
+        j["recent_logs"] = recent_logs;
+        
         j["timeline_24h"] = hourly_blocks_;
         
         json raw_stats;
@@ -170,10 +201,18 @@ void StatsLogger::SaveToFile(const std::string& filepath) {
         raw_stats["killed_processes"] = process_killed_cnt_;
         j["raw_stats"] = raw_stats;
         
-        std::ofstream file(filepath);
+        // 원자적 파일 저장: .tmp 파일에 먼저 쓴 뒤 rename으로 교체
+        // → GUI가 반쯤 쓰인 JSON을 읽는 경쟁 조건 방지
+        std::string tmp_filepath = filepath + ".tmp";
+        std::ofstream file(tmp_filepath);
         if (file.is_open()) {
             file << j.dump(4);
             file.close();
+#ifdef _WIN32
+            MoveFileExA(tmp_filepath.c_str(), filepath.c_str(), MOVEFILE_REPLACE_EXISTING);
+#else
+            rename(tmp_filepath.c_str(), filepath.c_str());
+#endif
         }
     } catch (...) {
         // 예외 무시

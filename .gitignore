@@ -71,3 +71,11 @@ Testing/
 # FocusGuard runtime generated & config files
 core_engine/FocusGuard_stats.json
 core_engine/whitelist.json
+qt_gui/user_settings.json
+
+# Visual Studio & IDE files
+.vs/
+out/
+*.user
+*.suo
+

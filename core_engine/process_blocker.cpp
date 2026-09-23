@@ -1,5 +1,6 @@
 #include "process_blocker.h"
 #include "stats_logger.h"
+#include "config.h"
 
 // RAII 패턴을 적용한 안전한 핸들 관리 클래스
 struct AutoHandle {
@@ -27,6 +28,11 @@ void process_blocker_func()
     while (true) {
         // 0.2초마다 검사 (타임 갭 최소화)
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        // 휴식 모드(pause.flag 활성)인 경우 프로세스 차단 일시 중지
+        if (g_is_paused.load()) {
+            continue;
+        }
 
         std::vector<std::string> current_blacklist;
         {

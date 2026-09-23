@@ -152,3 +152,4 @@ extern std::vector<std::string> blacklist_process;
 extern PacketPool g_packet_pool;
 extern HANDLE g_hIocp;
 extern PacketTxQueue g_outbound_queue;
+extern std::atomic<bool> g_is_paused; // GUI 휴식 모드 플래그 (pause.flag 파일로 제어)

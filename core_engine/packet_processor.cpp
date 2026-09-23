@@ -152,6 +152,9 @@ void add_to_whitelist_safe(const std::string& new_domain) {
 void load_whitelist() {
     try {
         std::ifstream f("whitelist.json");
+        if (!f.is_open()) {
+            f.open("core_engine/whitelist.json");
+        }
         if (f.is_open()) {
             json data = json::parse(f);
             std::vector<std::string> new_wl;
@@ -258,6 +261,11 @@ void consumer_func(pcap_t* adhandle) {
 
             // ── 패킷 기본 길이 유효성 검사 ──
             if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header)) continue;
+
+            // 일시정지 상태(휴식 모드)면 모든 패킷 통과
+            if (g_is_paused.load()) {
+                continue;
+            }
 
             // 1. 이더넷 헤더 매핑
             struct pkt_eth_header* eth = (struct pkt_eth_header*)pkt_data;
@@ -505,8 +513,17 @@ void consumer_func(pcap_t* adhandle) {
                 }
                 if (is_pending) {
                     queue_spoofed_rst_packet(pkt_data, header->caplen, "Pending Block");
+                } else {
+                    // 캐시에 없는 기존 연결(SNI 없는 데이터 패킷)
+                    // → 집중 모드에서는 RST로 강제 종료 (휴식 중 allowed된 소켓 즉시 차단)
+                    {
+                        std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+                        if (blocked_conns.count(conn_id) == 0) {
+                            blocked_conns[conn_id] = time(nullptr);
+                        }
+                    }
+                    queue_spoofed_rst_packet(pkt_data, header->caplen, "Stale Connection");
                 }
-                // pending에도 없으면 → 기존 연결, 일단 통과
             }
         } catch (const std::exception& e) {
             std::cerr << "\n[Error] Worker Thread 내부 예외 발생 (무시하고 계속 실행): " << e.what() << std::endl;

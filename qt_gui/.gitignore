@@ -1,0 +1,42 @@
+# Build directories
+build/
+Build/
+build-*/
+out/
+
+# Qt Creator & Visual Studio IDE settings
+.vs/
+*.user
+*.user.*
+*.suo
+*.sln.docstates
+
+# CMake local user presets & cache
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# FocusNet Guardian runtime generated user settings
+user_settings.json
+
+# Compiler, Linker & Debugger outputs
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.exe
+*.dll
+
+# Qt generated MOC, RCC & QML cache
+*_autogen/
+.rcc/
+.qt/
+.qmlcache/
+
+# Temporary files
+*.tmp
+*.log
+*.bak

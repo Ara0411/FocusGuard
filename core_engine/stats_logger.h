@@ -2,6 +2,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <deque>
 #include <mutex>
 #include <ctime>
 
@@ -33,6 +34,7 @@ private:
     std::unordered_map<std::string, int> domain_block_counts_;
     std::unordered_map<std::string, time_t> last_log_time_;
     std::vector<int> hourly_blocks_;
+    std::deque<std::pair<time_t, std::string>> recent_blocks_; // 실시간 차단 로그 (최대 50개)
 
     void RecordBlockTime();
 };

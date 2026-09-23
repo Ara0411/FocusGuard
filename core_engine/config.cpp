@@ -10,5 +10,6 @@ std::vector<std::string> whitelist_domains;
 std::vector<std::string> blacklist_domains;
 std::vector<std::string> blacklist_process;
 PacketPool g_packet_pool;
-HANDLE g_hIocp;
+HANDLE g_hIocp = NULL;
 PacketTxQueue g_outbound_queue;
+std::atomic<bool> g_is_paused(false);
