@@ -23,6 +23,14 @@ ApplicationWindow {
     title: "FocusNet Guardian"
     color: "#0D111A"
 
+    onClosing: function(close) {
+        if (backend.trayOnClose) {
+            close.accepted = false
+            root.hide()
+            backend.showTrayNotification("FocusNet Guardian", "시스템 트레이로 최소화되었습니다. 백그라운드에서 감시 엔진이 계속 실행 중입니다.")
+        }
+    }
+
     // =================================================================
     //  C++ 백엔드(Npcap 엔진) 연동용 루트 프로퍼티
     // =================================================================
@@ -46,8 +54,21 @@ ApplicationWindow {
     property int    blockedSecs:  backend.blockedSecs
     property int    bestRecord:   backend.bestRecord
     property string userName:     backend.userName
-    property int    focusHours:   Math.max(1, Math.floor(timerCount / 3600))
-    property int    notifyCount:  3
+    property int    focusHours:   Math.floor(timerCount / 3600)
+    property int    notifyCount:  0
+
+    function focusSummarySubtitle() {
+        if (timerCount < 60) {
+            return "오늘 <font color='#7B8BFF'><b>집중을 시작했습니다!</b></font> 🎯"
+        } else if (timerCount < 3600) {
+            var m = Math.floor(timerCount / 60)
+            return "오늘 <font color='#7B8BFF'><b>" + m + "분째</b></font> 집중 중입니다! 🔥"
+        } else {
+            var h = Math.floor(timerCount / 3600)
+            return "오늘 <font color='#7B8BFF'><b>" + h + "시간째</b></font> 집중 중입니다! 🔥"
+        }
+    }
+
     property int    currentHour:  new Date().getHours()
     property real   goalRatio:    Math.min(1.0, timerCount / Math.max(1, targetCount))
 
@@ -244,8 +265,8 @@ ApplicationWindow {
 
     // ---- 설정 -------------------------------------------------------
     property int    blockMode:     backend.blockMode        // 0 = 엄격(Default-Deny), 1 = 유연(Blacklist)
-    property var    nicList:       ["Intel(R) Wi-Fi 6E AX211 160MHz", "Realtek PCIe GbE Family Controller", "TAP-Windows Adapter V9"]
-    property int    nicIndex:      0
+    property var    nicList:       backend.nicList
+    property int    nicIndex:      backend.nicIndex
     property int    rstRetry:      backend.rstRetry
     property int    pomodoroFocus: backend.pomodoroFocus
     property int    pomodoroRest:  backend.pomodoroRest
@@ -323,6 +344,7 @@ ApplicationWindow {
         case 2:  return cmpSites
         case 3:  return cmpAnalytics
         case 4:  return cmpSettings
+        case 5:  return cmpEngineLog
         default: return cmpDashboard
         }
     }
@@ -393,6 +415,7 @@ ApplicationWindow {
                             ListElement { label: "사이트 관리"; glyph: "globe" }
                             ListElement { label: "집중 통계";   glyph: "bars" }
                             ListElement { label: "설정";       glyph: "gear" }
+                            ListElement { label: "엔진 콘솔";   glyph: "cpu" }
                         }
                         delegate: Rectangle {
                             id: navItem
@@ -533,6 +556,7 @@ ApplicationWindow {
     Component { id: cmpSites;     SitesPage {} }
     Component { id: cmpAnalytics; AnalyticsPage {} }
     Component { id: cmpSettings;  SettingsPage {} }
+    Component { id: cmpEngineLog; EngineLogPage {} }
 
     // 대시보드 사이트 등록 핸들러 (C++ 로 시그널 전달 지점)
     function registerSite(v) {

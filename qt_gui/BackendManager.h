@@ -43,8 +43,26 @@ class BackendManager : public QObject
     Q_PROPERTY(bool    trayOnClose   READ trayOnClose   WRITE setTrayOnClose   NOTIFY trayOnCloseChanged)
     Q_PROPERTY(QString settingsFilePath READ settingsFilePath CONSTANT)
 
+    // ── AI 통계 분석 (사용자 인터넷 사용 유형) ─────────────────
+    Q_PROPERTY(bool        isAiAnalyzing    READ isAiAnalyzing    NOTIFY isAiAnalyzingChanged)
+    Q_PROPERTY(QString     aiUserType       READ aiUserType       NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QString     aiTypeIcon       READ aiTypeIcon       NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QString     aiTypeColor      READ aiTypeColor      NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QString     aiAnalysisReport READ aiAnalysisReport NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QStringList aiActionPlan     READ aiActionPlan     NOTIFY aiAnalysisFinished)
+
+    // ── Npcap 엔진 프로세스 및 콘솔 로그 제어 ─────────────────
+    Q_PROPERTY(bool        isEngineRunning  READ isEngineRunning  NOTIFY isEngineRunningChanged)
+    Q_PROPERTY(QStringList engineLogs       READ engineLogs       NOTIFY engineLogsChanged)
+
+    // ── 네트워크 인터페이스 (NIC) 어댑터 제어 ─────────────────
+    Q_PROPERTY(QStringList nicList          READ nicList          NOTIFY nicListChanged)
+    Q_PROPERTY(int         nicIndex         READ nicIndex         WRITE setNicIndex NOTIFY nicIndexChanged)
+    Q_PROPERTY(QString     targetAdapter    READ targetAdapter    WRITE setTargetAdapter NOTIFY targetAdapterChanged)
+
 public:
     explicit BackendManager(QObject *parent = nullptr);
+    virtual ~BackendManager();
 
     // Getters
     double      focusScore()       const { return m_focusScore; }
@@ -75,6 +93,21 @@ public:
     bool        autoStart()        const { return m_autoStart; }
     bool        trayOnClose()      const { return m_trayOnClose; }
 
+    // AI Getters
+    bool        isAiAnalyzing()    const { return m_isAiAnalyzing; }
+    QString     aiUserType()       const { return m_aiUserType; }
+    QString     aiTypeIcon()       const { return m_aiTypeIcon; }
+    QString     aiTypeColor()      const { return m_aiTypeColor; }
+    QString     aiAnalysisReport() const { return m_aiAnalysisReport; }
+    QStringList aiActionPlan()     const { return m_aiActionPlan; }
+
+    // Engine & NIC Getters
+    bool        isEngineRunning()  const { return m_isEngineRunning; }
+    QStringList engineLogs()       const { return m_engineLogs; }
+    QStringList nicList()          const { return m_nicList; }
+    int         nicIndex()         const { return m_nicIndex; }
+    QString     targetAdapter()    const { return m_targetAdapter; }
+
     // Setters
     void setIsPaused(bool v);
     void setUserName(const QString &v);
@@ -86,12 +119,27 @@ public:
     void setToastEnabled(bool v);
     void setAutoStart(bool v);
     void setTrayOnClose(bool v);
+    void setNicIndex(int v);
+    void setTargetAdapter(const QString &v);
 
 public slots:
     void reloadStats();
     void loadSettings();
     void saveSettings();
     void togglePause();
+
+    // 엔진 라이프사이클 및 로그 제어 (QML 호출용)
+    Q_INVOKABLE void startEngine();
+    Q_INVOKABLE void stopEngine();
+    Q_INVOKABLE void restartEngine();
+    Q_INVOKABLE void clearEngineLogs();
+
+    // NIC 어댑터 갱신 및 선택
+    Q_INVOKABLE void refreshNetworkAdapters();
+    Q_INVOKABLE void selectNetworkAdapter(int index);
+
+    // AI 인터넷 사용 유형 분석 요청 (QML 호출)
+    Q_INVOKABLE void requestAiUserAnalysis();
 
     // 일괄 설정 저장 (QML 호출용)
     Q_INVOKABLE void saveAppSettings(int blockMode, int rstRetry, int pomodoroFocus, int pomodoroRest, bool toastEnabled, bool autoStart, bool trayOnClose, const QString &userName, const QString &targetTime);
@@ -106,7 +154,16 @@ public slots:
     Q_INVOKABLE void addBlockedProcess(const QString &processName);
     Q_INVOKABLE void removeBlockedProcess(const QString &processName);
 
+    // 선택 일괄 삭제 (다중 체크박스 선택 삭제)
+    Q_INVOKABLE void removeSelectedSites(int tabIndex, const QStringList &targets);
+
+    // 시스템 트레이 알림 및 윈도우 표시 제어
+    Q_INVOKABLE void showTrayNotification(const QString &title, const QString &message);
+    Q_INVOKABLE void requestShowWindow();
+    Q_INVOKABLE void quitApp();
+
 signals:
+    void showWindowRequested();
     void focusScoreChanged();
     void elapsedSecsChanged();
     void focusTimeChanged();
@@ -133,6 +190,14 @@ signals:
     void toastEnabledChanged();
     void autoStartChanged();
     void trayOnCloseChanged();
+    void isAiAnalyzingChanged();
+    void aiAnalysisFinished();
+    void isEngineRunningChanged();
+    void engineLogsChanged();
+    void nicListChanged();
+    void nicIndexChanged();
+    void targetAdapterChanged();
+    void trayNotificationRequested(const QString &title, const QString &message);
 
 private:
     // 파일 경로 (생성자에서 자동 탐색)
@@ -140,6 +205,26 @@ private:
     QString m_whitelistFilePath;
     QString m_pauseFlagPath;
     QString m_settingsFilePath;
+    QString m_engineExePath;
+
+    // 엔진 프로세스 및 로그
+    class QProcess *m_engineProcess = nullptr;
+    bool        m_isEngineRunning   = false;
+    QStringList m_engineLogs;
+
+    // NIC 장치 목록 (표시용 목록 vs 실제 하드웨어 명칭 목록)
+    QStringList m_nicList;
+    QStringList m_nicRawList;
+    int         m_nicIndex          = 0;
+    QString     m_targetAdapter     = "AUTO";
+
+    // AI 인터넷 사용 유형 결과 캐시
+    bool        m_isAiAnalyzing    = false;
+    QString     m_aiUserType       = "분석 대기 중";
+    QString     m_aiTypeIcon       = "sparkles";
+    QString     m_aiTypeColor      = "#818CF8";
+    QString     m_aiAnalysisReport = "집중 세션 동안 축적된 네트워크 패킷 및 차단 로그를 AI가 분석하여 사용자의 인터넷 몰입 유형과 개선 가이드를 도출합니다.";
+    QStringList m_aiActionPlan;
 
     // 폴링 타이머
     QTimer *m_timer = nullptr;

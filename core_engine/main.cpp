@@ -57,8 +57,7 @@ int main() {
     if (!IsRunAsAdmin()) {
         std::cerr << "\n[Error] ⛔ 관리자 권한이 없습니다!" << std::endl;
         std::cerr << "유튜브 등 최신 사이트가 사용하는 QUIC(UDP 443) 통신을 차단하려면 방화벽 제어가 필요합니다." << std::endl;
-        std::cerr << "Visual Studio를 [관리자 권한으로 실행]하거나, black_test.exe를 우클릭 후 관리자로 실행해 주세요.\n" << std::endl;
-        system("pause");
+        std::cerr << "프로그램을 [관리자 권한으로 실행]해 주세요.\n" << std::endl;
         return -1;
     }
 
@@ -86,39 +85,67 @@ int main() {
         return -1;
     }
 
-    // 2. 배포용 엔진: 사용자 개입 없이 활성 인터넷 어댑터 자동 선택
-    for (d = alldevs; d != NULL; d = d->next) {
-        if (d->flags & PCAP_IF_LOOPBACK) continue;
-        
-        bool has_ipv4 = false;
-        for (pcap_addr_t* a = d->addresses; a != NULL; a = a->next) {
-            if (a->addr && a->addr->sa_family == AF_INET) {
-                struct sockaddr_in* sa = (struct sockaddr_in*)a->addr;
-                // APIPA (169.254.x.x) 주소는 무시 (연결 안 된 어댑터)
-                if (!(sa->sin_addr.S_un.S_un_b.s_b1 == 169 && sa->sin_addr.S_un.S_un_b.s_b2 == 254)) {
-                    has_ipv4 = true;
-                    break;
-                }
+    // JSON 화이트리스트 및 어댑터 설정 로드
+    load_whitelist();
+
+    // 2. 어댑터 선택: whitelist.json의 target_adapter가 명시적으로 지정되어 있으면 우선 매칭
+    if (!g_target_adapter.empty() && g_target_adapter != "AUTO" && g_target_adapter != "자동 감지") {
+        for (d = alldevs; d != NULL; d = d->next) {
+            std::string dName = d->name ? d->name : "";
+            std::string dDesc = d->description ? d->description : "";
+            if (dName == g_target_adapter || dDesc == g_target_adapter || 
+                dDesc.find(g_target_adapter) != std::string::npos ||
+                dName.find(g_target_adapter) != std::string::npos) {
+                target_dev = d;
+                std::cout << "[Info] 지정된 사용자 네트워크 어댑터 선택됨: " << (d->description ? d->description : d->name) << std::endl;
+                break;
             }
         }
+    }
 
-        std::string desc = d->description ? d->description : "";
-        // 가상 머신이나 루프백 등 실제 통신이 아닌 어댑터 배제
-        if (desc.find("VMware") != std::string::npos || 
-            desc.find("Virtual") != std::string::npos || 
-            desc.find("Hyper-V") != std::string::npos || 
-            desc.find("Loopback") != std::string::npos) {
-            continue;
+    // 2-B. 지정된 어댑터가 없거나 "AUTO"인 경우: 활성 인터넷 어댑터 자동 탐색
+    if (target_dev == NULL) {
+        if (!g_target_adapter.empty() && g_target_adapter != "AUTO" && g_target_adapter != "자동 감지") {
+            std::cout << "[Warning] 지정된 어댑터(" << g_target_adapter << ")를 찾지 못하여 활성 네트워크 자동 감지로 전환합니다." << std::endl;
+        } else {
+            std::cout << "[Info] 🌐 네트워크 어댑터 자동 감지(AUTO) 모드 가동 중..." << std::endl;
         }
+        for (d = alldevs; d != NULL; d = d->next) {
+            if (d->flags & PCAP_IF_LOOPBACK) continue;
+            
+            bool has_ipv4 = false;
+            for (pcap_addr_t* a = d->addresses; a != NULL; a = a->next) {
+                if (a->addr && a->addr->sa_family == AF_INET) {
+                    struct sockaddr_in* sa = (struct sockaddr_in*)a->addr;
+                    // APIPA (169.254.x.x) 주소는 무시 (연결 안 된 어댑터)
+                    if (!(sa->sin_addr.S_un.S_un_b.s_b1 == 169 && sa->sin_addr.S_un.S_un_b.s_b2 == 254)) {
+                        has_ipv4 = true;
+                        break;
+                    }
+                }
+            }
 
-        if (has_ipv4) {
-            target_dev = d;
-            break;
+            std::string desc = d->description ? d->description : "";
+            // 가상 머신이나 루프백, 블루투스 등 실제 인터넷 통신이 아닌 어댑터 배제
+            if (desc.find("VMware") != std::string::npos || 
+                desc.find("Virtual") != std::string::npos || 
+                desc.find("Hyper-V") != std::string::npos || 
+                desc.find("Loopback") != std::string::npos ||
+                desc.find("Bluetooth") != std::string::npos) {
+                continue;
+            }
+
+            if (has_ipv4) {
+                target_dev = d;
+                std::cout << "[Info] 활성 인터넷 네트워크 어댑터 자동 선택됨: " << (d->description ? d->description : d->name) << std::endl;
+                break;
+            }
         }
     }
 
     if (target_dev == NULL && alldevs != NULL) {
         target_dev = alldevs; // 조건에 맞는 게 없으면 첫 번째 어댑터 강제 선택
+        std::cout << "[Info] 기본 첫 번째 어댑터 선택됨: " << (target_dev->description ? target_dev->description : target_dev->name) << std::endl;
     }
 
     if (target_dev == NULL) {
@@ -127,10 +154,7 @@ int main() {
         return -1;
     }
 
-    // JSON 화이트리스트 로드
-    load_whitelist();
-
-    std::cout << "[Info] 캡처 장치 선택 완료: " << target_dev->description << std::endl;
+    std::cout << "[Info] 캡처 장치 선택 완료: " << (target_dev->description ? target_dev->description : target_dev->name) << std::endl;
 
     // 3. 어댑터 열기 (캡처 시작)
     pcap_t* adhandle = pcap_open_live(

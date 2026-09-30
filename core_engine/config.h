@@ -153,3 +153,4 @@ extern PacketPool g_packet_pool;
 extern HANDLE g_hIocp;
 extern PacketTxQueue g_outbound_queue;
 extern std::atomic<bool> g_is_paused; // GUI 휴식 모드 플래그 (pause.flag 파일로 제어)
+extern std::string g_target_adapter; // GUI에서 지정한 우선 캡처 NIC 어댑터명

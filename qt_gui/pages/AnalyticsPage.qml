@@ -142,6 +142,180 @@ Item {
                 }
             }
 
+            // ---------- AI 사용자 인터넷 사용 유형 분석 카드 ----------
+            Card {
+                Layout.fillWidth: true
+                Layout.leftMargin: 28
+                Layout.rightMargin: 28
+                Layout.preferredHeight: aiCol.implicitHeight + 36
+
+                ColumnLayout {
+                    id: aiCol
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 12
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Rectangle {
+                            Layout.preferredWidth: 32
+                            Layout.preferredHeight: 32
+                            radius: 8
+                            color: "#1E1B4B"
+                            border.width: 1
+                            border.color: "#4338CA"
+                            Icon {
+                                anchors.centerIn: parent
+                                name: "sparkles"
+                                stroke: "#A5B4FC"
+                                implicitWidth: 18; implicitHeight: 18
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Txt {
+                                text: "AI 사용자 인터넷 사용 유형 진단 리포트"
+                                font.pixelSize: 14; font.weight: Font.DemiBold; color: "#F2F5FB"
+                            }
+                            Txt {
+                                text: "오늘의 방어 통계와 딴짓 도메인 패턴을 머신 분석하여 도출한 맞춤형 몰입 페르소나입니다."
+                                font.pixelSize: 11; color: "#7C8699"
+                            }
+                        }
+
+                        SolidBtn {
+                            height: 34
+                            text: backend.isAiAnalyzing ? "AI 분석 중..." : "AI 진단 실행"
+                            glyph: "refresh"
+                            bg: "#6366F1"
+                            enabled: !backend.isAiAnalyzing
+                            onClicked: backend.requestAiUserAnalysis()
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: "#1E2638"
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.minimumHeight: 140
+                        spacing: 18
+
+                        // 좌측: 유형 뱃지 & 아이콘
+                        Rectangle {
+                            Layout.preferredWidth: 230
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: 140
+                            radius: 12
+                            color: "#121826"
+                            border.width: 1
+                            border.color: "#242F46"
+
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                spacing: 8
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    width: 44; height: 44; radius: 22
+                                    color: "#1C243B"
+                                    border.width: 1
+                                    border.color: backend.aiTypeColor
+                                    Icon {
+                                        anchors.centerIn: parent
+                                        name: backend.aiTypeIcon
+                                        stroke: backend.aiTypeColor
+                                        implicitWidth: 22; implicitHeight: 22
+                                    }
+                                }
+                                Txt {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: backend.aiUserType
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
+                                    color: backend.aiTypeColor
+                                }
+                                Pill {
+                                    Layout.alignment: Qt.AlignHCenter
+                                    text: "온디바이스 AI 판정"
+                                    fontSize: 10
+                                    fg: "#94A3B8"
+                                    color: "#1E293B"
+                                }
+                            }
+                        }
+
+                        // 우측: 총평 및 개선 가이드 3단계
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: reportTxt.implicitHeight + 20
+                                radius: 10
+                                color: "#131A29"
+                                border.width: 1
+                                border.color: "#1F2B42"
+                                Txt {
+                                    id: reportTxt
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    text: backend.aiAnalysisReport
+                                    font.pixelSize: 12
+                                    lineHeight: 1.45
+                                    color: "#CBD5E1"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            // 실천 가이드 3가지
+                            ColumnLayout {
+                                visible: backend.aiActionPlan.length > 0
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Repeater {
+                                    model: backend.aiActionPlan
+                                    delegate: RowLayout {
+                                        required property var modelData
+                                        required property int index
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Rectangle {
+                                            Layout.preferredWidth: 18
+                                            Layout.preferredHeight: 18
+                                            radius: 9
+                                            color: "#1E293B"
+                                            Txt {
+                                                anchors.centerIn: parent
+                                                text: (index + 1)
+                                                font.pixelSize: 10
+                                                font.weight: Font.Bold
+                                                color: "#38BDF8"
+                                            }
+                                        }
+                                        Txt {
+                                            Layout.fillWidth: true
+                                            text: modelData
+                                            font.pixelSize: 11
+                                            color: "#94A3B8"
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---------- 2단 시각화 (6 : 4) ----------
             RowLayout {
                 Layout.fillWidth: true

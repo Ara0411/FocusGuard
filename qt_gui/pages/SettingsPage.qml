@@ -268,20 +268,38 @@ Item {
 
                         Txt { text: "네트워크 인터페이스 (NIC)"; font.pixelSize: 12
                               font.weight: Font.DemiBold; color: "#C3CBDB" }
-                        Item { Layout.preferredHeight: 10 }
+                        Item { Layout.preferredHeight: 4 }
+                        Txt {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 0
+                            text: "기본적으로 현재 인터넷 트래픽이 활성화된 네트워크를 자동으로 감지하여 차단합니다."
+                            font.pixelSize: 11
+                            color: "#7E8B9F"
+                            wrapMode: Text.WordWrap
+                            lineHeight: 1.35
+                        }
+                        Item { Layout.preferredHeight: 8 }
                         Combo {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 44
                             options: root.nicList
                             currentIndex: root.nicIndex
-                            onActivated: function(i) { root.nicIndex = i }
+                            onActivated: function(i) {
+                                root.nicIndex = i
+                                backend.selectNetworkAdapter(i)
+                                if (i === 0) {
+                                    saveToast.show("네트워크 인터페이스가 '자동 감지'(으)로 설정되었습니다.")
+                                } else {
+                                    saveToast.show("네트워크 인터페이스가 '" + root.nicList[i] + "'(으)로 변경되었습니다.")
+                                }
+                            }
                         }
 
                         Item { Layout.preferredHeight: 18 }
 
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 64
+                            Layout.preferredHeight: 74
                             radius: 10
                             color: "#101622"
                             border.width: 1
@@ -298,14 +316,18 @@ Item {
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 3
+                                    spacing: 4
                                     Txt {
+                                        Layout.fillWidth: true
                                         text: "패킷 주입 최적화 (Hairpinning TCP RST)"
                                         font.pixelSize: 12; font.weight: Font.DemiBold; color: "#C3CBDB"
+                                        elide: Text.ElideRight
                                     }
                                     Txt {
+                                        Layout.fillWidth: true
                                         text: "양방향 세션 즉시 차단 알고리즘이 내장 고정되어 최상의 차단율을 유지합니다."
                                         font.pixelSize: 11; color: "#5F6879"
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }

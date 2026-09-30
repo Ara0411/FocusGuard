@@ -5,12 +5,17 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
+#include <QSettings>
+#include <QSystemTrayIcon>
+#include <QProcess>
+#include <QRegularExpression>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <ctime>
 #include <algorithm>
 #ifdef _WIN32
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 using json = nlohmann::json;
@@ -44,8 +49,17 @@ BackendManager::BackendManager(QObject *parent)
     m_pauseFlagPath    = ws + "/core_engine/pause.flag";
     m_settingsFilePath = ws + "/qt_gui/user_settings.json";
 
-    qDebug() << "[BackendManager] workspace =" << ws;
-    qDebug() << "[BackendManager] stats     =" << m_statsFilePath;
+    // 코어 엔진 실행 파일 경로 탐색
+    QString engineCandidate = ws + "/core_engine/x64/Debug/FocusGuard.exe";
+    if (QFile::exists(engineCandidate)) {
+        m_engineExePath = engineCandidate;
+    } else {
+        m_engineExePath = ws + "/core_engine/x64/Release/FocusGuard.exe";
+    }
+
+    qDebug() << "[BackendManager] workspace  =" << ws;
+    qDebug() << "[BackendManager] stats      =" << m_statsFilePath;
+    qDebug() << "[BackendManager] engine exe =" << m_engineExePath;
 
     // 기본 타임라인 데이터 초기화 (24시간)
     for (int i = 0; i < 24; ++i)
@@ -54,6 +68,9 @@ BackendManager::BackendManager(QObject *parent)
     // 기본 주간 데이터 초기화 (7일: 월~일)
     for (int i = 0; i < 7; ++i)
         m_weeklyMinutes.append(0);
+
+    // NIC 장치 초기 수집
+    refreshNetworkAdapters();
 
     loadSettings();
     loadWhitelistFile();
@@ -64,6 +81,16 @@ BackendManager::BackendManager(QObject *parent)
     m_timer->start(1000);
 
     reloadStats();
+
+    // 코어 감시 엔진(FocusGuard.exe) 자동 기동 (UAC 관리자 권한 상속)
+    QTimer::singleShot(500, this, [this]() {
+        startEngine();
+    });
+}
+
+BackendManager::~BackendManager()
+{
+    stopEngine();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -197,6 +224,15 @@ void BackendManager::loadWhitelistFile()
             emit blockedProcessesChanged();
         }
 
+        // 4. target_adapter
+        if (j.contains("target_adapter")) {
+            m_targetAdapter = QString::fromStdString(j["target_adapter"].get<std::string>()).trimmed();
+            if (m_targetAdapter.isEmpty()) m_targetAdapter = "AUTO";
+        } else {
+            m_targetAdapter = "AUTO";
+        }
+        emit targetAdapterChanged();
+
     } catch (...) {
         qDebug() << "[BackendManager] whitelist.json parse error";
     }
@@ -249,6 +285,12 @@ void BackendManager::saveWhitelistFile()
         }
     }
     j["blocked_process"] = arrProc;
+
+    if (!m_targetAdapter.isEmpty() && m_targetAdapter != "AUTO") {
+        j["target_adapter"] = m_targetAdapter.toStdString();
+    } else {
+        j["target_adapter"] = "AUTO";
+    }
 
     // 5. QSaveFile을 사용한 안전하고 원자적인 파일 쓰기
     QSaveFile sFile(m_whitelistFilePath);
@@ -355,6 +397,54 @@ void BackendManager::removeBlockedProcess(const QString &processName)
     }
 }
 
+void BackendManager::removeSelectedSites(int tabIndex, const QStringList &targets)
+{
+    if (targets.isEmpty()) return;
+    qDebug() << "[BackendManager] removeSelectedSites: tabIndex=" << tabIndex << ", count=" << targets.size();
+
+    bool changed = false;
+    if (tabIndex == 0) {
+        // 화이트리스트
+        for (const QString &t : targets) {
+            QString d = t.trimmed().toLower();
+            if (m_whitelistDomains.removeAll(d) > 0) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            emit whitelistDomainsChanged();
+            saveWhitelistFile();
+        }
+    } else if (tabIndex == 1) {
+        // 블랙리스트
+        for (const QString &t : targets) {
+            QString d = t.trimmed().toLower();
+            if (m_blacklistDomains.removeAll(d) > 0) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            emit blacklistDomainsChanged();
+            saveWhitelistFile();
+        }
+    } else if (tabIndex == 2) {
+        // 차단 앱/프로세스
+        for (const QString &t : targets) {
+            QString p = t.trimmed();
+            for (int i = m_blockedProcesses.size() - 1; i >= 0; --i) {
+                if (m_blockedProcesses[i].toString().compare(p, Qt::CaseInsensitive) == 0) {
+                    m_blockedProcesses.removeAt(i);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            emit blockedProcessesChanged();
+            saveWhitelistFile();
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  통계 JSON 폴링 (1초마다 호출)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -401,11 +491,15 @@ void BackendManager::reloadStats()
                         }
                     }
 
-                    // 최고 기록 자동 갱신 및 영구 저장
+                    // 최고 기록 자동 갱신 및 영구 저장 (I/O 부하 방지를 위해 30초 간격으로 디스크 저장)
                     if (m_elapsedSecs > m_bestRecord) {
                         m_bestRecord = m_elapsedSecs;
                         emit bestRecordChanged();
-                        saveSettings();
+                        static int lastSavedBest = 0;
+                        if (m_elapsedSecs - lastSavedBest >= 30) {
+                            lastSavedBest = m_elapsedSecs;
+                            saveSettings();
+                        }
                     }
                 }
                 QString ts = QString("%1:%2:%3")
@@ -609,12 +703,46 @@ void BackendManager::setToastEnabled(bool v)
 
 void BackendManager::setAutoStart(bool v)
 {
-    if (m_autoStart != v) { m_autoStart = v; emit autoStartChanged(); saveSettings(); }
+    if (m_autoStart != v) {
+        m_autoStart = v;
+        emit autoStartChanged();
+        saveSettings();
+    }
+
+#ifdef _WIN32
+    QSettings bootSettings("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", QSettings::NativeFormat);
+    const QString appName = "FocusNetGuardian";
+    const QString appPath = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+
+    if (v) {
+        bootSettings.setValue(appName, QString("\"%1\"").arg(appPath));
+        qDebug() << "[BackendManager] Windows registry autostart registered:" << appPath;
+    } else {
+        bootSettings.remove(appName);
+        qDebug() << "[BackendManager] Windows registry autostart removed";
+    }
+#endif
 }
 
 void BackendManager::setTrayOnClose(bool v)
 {
     if (m_trayOnClose != v) { m_trayOnClose = v; emit trayOnCloseChanged(); saveSettings(); }
+}
+
+void BackendManager::showTrayNotification(const QString &title, const QString &message)
+{
+    qDebug() << "[BackendManager] Tray Notification:" << title << "-" << message;
+    emit trayNotificationRequested(title, message);
+}
+
+void BackendManager::requestShowWindow()
+{
+    emit showWindowRequested();
+}
+
+void BackendManager::quitApp()
+{
+    QCoreApplication::quit();
 }
 
 void BackendManager::saveAppSettings(int blockMode, int rstRetry, int pomodoroFocus, int pomodoroRest,
@@ -642,5 +770,375 @@ void BackendManager::saveAppSettings(int blockMode, int rstRetry, int pomodoroFo
     emit targetTimeChanged();
 
     saveSettings();
+}
+
+void BackendManager::requestAiUserAnalysis()
+{
+    if (m_isAiAnalyzing) return;
+    m_isAiAnalyzing = true;
+    emit isAiAnalyzingChanged();
+
+    // 0.8초 딜레이를 두어 자연스러운 AI 실시간 분석 연출
+    QTimer::singleShot(800, this, [this]() {
+        int videoCount = 0;
+        int snsCount = 0;
+        int msgCount = 0;
+        int gameCount = 0;
+        int etcCount = 0;
+        int totalBlocked = m_blockedAttempts;
+
+        for (const auto &v : m_topBlockedDomains) {
+            QVariantMap m = v.toMap();
+            QString name = m.value("name").toString().toLower();
+            int cnt = m.value("count").toInt();
+
+            if (name.contains("youtube") || name.contains("googlevideo") || name.contains("tiktok") || name.contains("twitch") || name.contains("netflix")) {
+                videoCount += cnt;
+            } else if (name.contains("instagram") || name.contains("facebook") || name.contains("twitter") || name.contains("x.com")) {
+                snsCount += cnt;
+            } else if (name.contains("discord") || name.contains("kakao") || name.contains("telegram")) {
+                msgCount += cnt;
+            } else if (name.contains("steam") || name.contains("nexon") || name.contains("riot") || name.contains("blizzard") || name.contains("league")) {
+                gameCount += cnt;
+            } else {
+                etcCount += cnt;
+            }
+        }
+
+        // 인터넷 사용 유형(페르소나) 추론 엔진
+        m_aiActionPlan.clear();
+
+        if (totalBlocked == 0 && m_elapsedSecs >= 1800) {
+            // 차단 시도 없이 장시간 몰입
+            m_aiUserType = "🧘 초지일관 고요한 수도승형";
+            m_aiTypeIcon = "shield-check";
+            m_aiTypeColor = "#10B981";
+            m_aiAnalysisReport = QString("오늘 %1 동안 단 1회의 방해 시도 없이 순도 높은 학습 몰입을 유지하고 있습니다. 유혹 신호에 뇌가 반응하지 않는 최상의 딥워크(Deep Work) 상태입니다.")
+                                    .arg(m_focusTime);
+            m_aiActionPlan << "현재의 훌륭한 집중 리듬을 유지하되 50분마다 5분의 스트레칭을 병행하세요."
+                           << "최대 집중 상태가 90분을 넘어가면 인지 피로가 누적되므로 휴식을 권장합니다."
+                           << "지금 학습한 핵심 내용을 5분간 복습 노트에 인출해 장기 기억으로 전환하세요.";
+        } else if (videoCount >= 5 || (totalBlocked > 0 && (double)videoCount / totalBlocked >= 0.4)) {
+            // 영상/스트리밍 편중
+            m_aiUserType = "🎬 충동적 도파민 탐험가형";
+            m_aiTypeIcon = "zap";
+            m_aiTypeColor = "#F43F5E";
+            m_aiAnalysisReport = QString("동영상 및 스트리밍 플랫폼 차단 비율이 전체의 %1%를 차지하고 있습니다. 뇌가 지루함을 느끼는 순간 무의식적으로 쇼츠/유튜브를 클릭하는 '시각적 도파민 보상 추구' 패턴이 감지되었습니다.")
+                                    .arg(totalBlocked > 0 ? (int)((double)videoCount / totalBlocked * 100) : 60);
+            m_aiActionPlan << "유튜브 관련 서브 도메인(googlevideo.com 등)을 사이트 관리에서 완전 차단 유지하세요."
+                           << "집중 시작 전 '오늘 볼 영상'을 메모장에 적어두고 학습 종료 후에만 열람하세요."
+                           << "공부 중 졸리거나 피로할 때는 화면 대신 일어나 1분간 가벼운 스트레칭을 하세요.";
+        } else if (msgCount >= 5 || (totalBlocked > 0 && (double)msgCount / totalBlocked >= 0.35)) {
+            // 메신저/연결 집착
+            m_aiUserType = "💬 사회적 연결 갈망형";
+            m_aiTypeIcon = "user";
+            m_aiTypeColor = "#38BDF8";
+            m_aiAnalysisReport = QString("카카오톡·디스코드 등 실시간 소통 앱 차단이 집중 흐름을 반복해서 끊고 있습니다. 타인의 연락에 즉각 반응해야 한다는 '연결 불안(FOMO)'이 무의식적인 앱 실행을 유발하고 있습니다.");
+            m_aiActionPlan << "뽀모도로 25분 집중 시간 동안에는 스마트폰을 뒤집어 시야 밖으로 치우세요."
+                           << "메신저 앱은 작업표시줄에서 완전히 종료하고 '휴식 시간 5분'에만 확인하세요."
+                           << "주요 대화 상대에게 '집중 시간 중에는 답장이 늦을 수 있다'고 미리 공유하세요.";
+        } else if (gameCount >= 3 || (totalBlocked > 0 && (double)gameCount / totalBlocked >= 0.3)) {
+            // 게임/런처 접근
+            m_aiUserType = "🎮 스트레스 탈출 게이머형";
+            m_aiTypeIcon = "cpu";
+            m_aiTypeColor = "#A855F7";
+            m_aiAnalysisReport = QString("난이도 높은 과제나 코딩 중 뇌가 과부하를 느낄 때 스트레스 회피성 게임 클라이언트 실행이 감지되었습니다. 단기 탈출 충동을 통제하는 보호 장치가 효과적으로 작동 중입니다.");
+            m_aiActionPlan << "게임 런처는 백그라운드 프로세스까지 FocusNet Guardian으로 완벽 차단하세요."
+                           << "과제가 막힐 때는 게임 대신 5분간 찬물을 마시거나 심호흡을 권장합니다."
+                           << "오늘의 목표 달성률 100% 달성 시 스스로에게 게임 1시간의 보상을 부여하세요.";
+        } else if (totalBlocked >= 10) {
+            // 다중 도메인 산발 분산
+            m_aiUserType = "⚡ 멀티태스킹 브라우징형";
+            m_aiTypeIcon = "refresh";
+            m_aiTypeColor = "#F59E0B";
+            m_aiAnalysisReport = QString("총 %1회의 다양한 사이트 차단이 감지되었습니다. 한 가지 화면에 10분 이상 머물지 못하고 여러 웹페이지 탭을 오가며 주의력이 분산되는 '팝콘 브레인' 패턴을 보입니다.")
+                                    .arg(totalBlocked);
+            m_aiActionPlan << "브라우저에서 지금 작업 중인 탭 단 1개만 남겨두고 나머지는 모두 닫으세요."
+                           << "엄격 모드(Default-Deny)를 활성화하여 화이트리스트 외 접속을 철저히 차단하세요."
+                           << "타이머 목표를 15분 단위로 작게 쪼개어 단기 완수 성공 경험을 쌓으세요.";
+        } else {
+            // 기본 상태
+            m_aiUserType = "🌱 잠재력 발휘 준비형";
+            m_aiTypeIcon = "target";
+            m_aiTypeColor = "#818CF8";
+            m_aiActionPlan << QString("일일 집중 목표 시간(현재 %1)을 달성할 때까지 세션을 이어가세요.").arg(m_targetTime)
+                           << "자주 방문하는 학습 필수 사이트만 화이트리스트에 꼼꼼히 등록하세요."
+                           << "최소 30분 이상 집중 후 AI 분석을 다시 요청하면 더욱 정밀한 피드백을 제공합니다.";
+        }
+
+        m_isAiAnalyzing = false;
+        emit isAiAnalyzingChanged();
+        emit aiAnalysisFinished();
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Npcap 엔진 제어 및 터미널 로그 스트리밍 (QProcess)
+// ─────────────────────────────────────────────────────────────────────────────
+void BackendManager::startEngine()
+{
+    if (m_isEngineRunning) return;
+
+    if (!QFile::exists(m_engineExePath)) {
+        QString ws = resolveWorkspacePath();
+        QString candidate = ws + "/core_engine/x64/Debug/FocusGuard.exe";
+        if (QFile::exists(candidate)) m_engineExePath = candidate;
+        else m_engineExePath = ws + "/core_engine/x64/Release/FocusGuard.exe";
+    }
+
+    if (!QFile::exists(m_engineExePath)) {
+        m_engineLogs.append(QString("[%1] [Error] 코어 엔진 실행 파일을 찾을 수 없습니다: %2")
+                            .arg(QDateTime::currentDateTime().toString("HH:mm:ss"), m_engineExePath));
+        emit engineLogsChanged();
+        return;
+    }
+
+    if (!m_engineProcess) {
+        m_engineProcess = new QProcess(this);
+
+        connect(m_engineProcess, &QProcess::readyReadStandardOutput, this, [this]() {
+            QByteArray out = m_engineProcess->readAllStandardOutput();
+            QString s = QString::fromUtf8(out).trimmed();
+            if (!s.isEmpty()) {
+                QStringList lines = s.split('\n', Qt::SkipEmptyParts);
+                for (const QString &line : lines) {
+                    m_engineLogs.append(line.trimmed());
+                }
+                while (m_engineLogs.size() > 500) {
+                    m_engineLogs.removeFirst();
+                }
+                emit engineLogsChanged();
+            }
+        });
+
+        connect(m_engineProcess, &QProcess::readyReadStandardError, this, [this]() {
+            QByteArray err = m_engineProcess->readAllStandardError();
+            QString s = QString::fromUtf8(err).trimmed();
+            if (!s.isEmpty()) {
+                QStringList lines = s.split('\n', Qt::SkipEmptyParts);
+                for (const QString &line : lines) {
+                    m_engineLogs.append(QString("[STDERR] %1").arg(line.trimmed()));
+                }
+                while (m_engineLogs.size() > 500) {
+                    m_engineLogs.removeFirst();
+                }
+                emit engineLogsChanged();
+            }
+        });
+
+        connect(m_engineProcess, &QProcess::started, this, [this]() {
+            m_isEngineRunning = true;
+            m_engineLogs.append(QString("[%1] [System] 🚀 코어 엔진(FocusGuard.exe)이 정상 기동되었습니다.")
+                                .arg(QDateTime::currentDateTime().toString("HH:mm:ss")));
+            emit isEngineRunningChanged();
+            emit engineLogsChanged();
+        });
+
+        connect(m_engineProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                this, [this](int exitCode, QProcess::ExitStatus exitStatus) {
+            m_isEngineRunning = false;
+            m_engineLogs.append(QString("[%1] [System] 🛑 코어 엔진이 종료되었습니다 (Code: %2, Status: %3)")
+                                .arg(QDateTime::currentDateTime().toString("HH:mm:ss")).arg(exitCode).arg(exitStatus));
+            emit isEngineRunningChanged();
+            emit engineLogsChanged();
+        });
+    }
+
+    m_engineLogs.append(QString("[%1] [System] 엔진 구동 요청: %2").arg(QDateTime::currentDateTime().toString("HH:mm:ss"), m_engineExePath));
+    emit engineLogsChanged();
+
+    // 엔진 실행 (작업 디렉터리는 core_engine 폴더로 설정하여 whitelist.json 정상 접근)
+    QFileInfo fi(m_engineExePath);
+    QString workDir = fi.absolutePath();
+    // core_engine 폴더가 한 단계 위인 경우
+    QDir d(workDir);
+    if (d.dirName() == "Debug" || d.dirName() == "Release") {
+        d.cdUp(); // x64
+        d.cdUp(); // core_engine
+        workDir = d.absolutePath();
+    }
+    m_engineProcess->setWorkingDirectory(workDir);
+
+    m_engineProcess->start(m_engineExePath, QStringList());
+
+    if (!m_engineProcess->waitForStarted(2000)) {
+        // 권한 상승(740) 등으로 일반 QProcess 시작 실패 시 ShellExecuteEx runas 비상 Fallback 실행
+        qWarning() << "[BackendManager] QProcess start failed, falling back to ShellExecuteEx runas";
+#ifdef _WIN32
+        std::wstring exeW = QDir::toNativeSeparators(m_engineExePath).toStdWString();
+        std::wstring dirW = QDir::toNativeSeparators(workDir).toStdWString();
+
+        SHELLEXECUTEINFOW sei = { sizeof(sei) };
+        sei.lpVerb = L"runas";
+        sei.lpFile = exeW.c_str();
+        sei.lpDirectory = dirW.c_str();
+        sei.nShow = SW_SHOWNORMAL;
+
+        if (ShellExecuteExW(&sei)) {
+            m_isEngineRunning = true;
+            m_engineLogs.append(QString("[%1] [System] 🛡️ UAC 권한 상승(ShellExecuteEx)으로 엔진이 독립 실행되었습니다.")
+                                .arg(QDateTime::currentDateTime().toString("HH:mm:ss")));
+            emit isEngineRunningChanged();
+            emit engineLogsChanged();
+        } else {
+            m_engineLogs.append(QString("[%1] [Error] 엔진 권한 상승 실행 실패 (Windows Error: %2)")
+                                .arg(QDateTime::currentDateTime().toString("HH:mm:ss")).arg(GetLastError()));
+            emit engineLogsChanged();
+        }
+#endif
+    }
+}
+
+void BackendManager::stopEngine()
+{
+    if (m_engineProcess && m_engineProcess->state() != QProcess::NotRunning) {
+        m_engineLogs.append(QString("[%1] [System] 엔진 종료 시그널 전달 중...").arg(QDateTime::currentDateTime().toString("HH:mm:ss")));
+        emit engineLogsChanged();
+        m_engineProcess->terminate();
+        if (!m_engineProcess->waitForFinished(2000)) {
+            m_engineProcess->kill();
+        }
+    } else {
+#ifdef _WIN32
+        // ShellExecuteEx 등으로 구동된 외부 FocusGuard.exe 프로세스 강제 종료
+        system("taskkill /F /IM FocusGuard.exe >nul 2>&1");
+        m_isEngineRunning = false;
+        m_engineLogs.append(QString("[%1] [System] 외부 FocusGuard.exe 프로세스를 종료했습니다.")
+                            .arg(QDateTime::currentDateTime().toString("HH:mm:ss")));
+        emit isEngineRunningChanged();
+        emit engineLogsChanged();
+#endif
+    }
+}
+
+void BackendManager::restartEngine()
+{
+    stopEngine();
+    QTimer::singleShot(800, this, [this]() {
+        startEngine();
+    });
+}
+
+void BackendManager::clearEngineLogs()
+{
+    m_engineLogs.clear();
+    emit engineLogsChanged();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  네트워크 인터페이스(NIC) 어댑터 수집 및 선택
+// ─────────────────────────────────────────────────────────────────────────────
+void BackendManager::refreshNetworkAdapters()
+{
+    QStringList rawList;
+    QStringList displayList;
+
+    // 1. 항상 최상단 0번 항목은 '자동 감지 (권장)'
+    rawList.append("AUTO");
+    displayList.append("🌐 자동 감지 (권장 - 활성 네트워크 자동 감지)");
+
+#ifdef _WIN32
+    // Windows PowerShell을 통해 물리 랜카드 위주로 수집
+    // 가상 네트워크(VMware, VirtualBox, vEthernet, WSL 등), 루프백(Loopback), 블루투스(Bluetooth) 장치는 목록에서 숨김
+    QProcess p;
+    p.start("powershell", QStringList() << "-NoProfile" << "-Command"
+            << "Get-NetAdapter | Where-Object { $_.InterfaceDescription -notmatch 'Virtual|VMware|VirtualBox|vEthernet|WSL|Loopback|Bluetooth|TAP-Windows' } "
+               "| Sort-Object @{Expression={ if ($_.Status -eq 'Up') { 0 } else { 1 } }} "
+               "| Select-Object -ExpandProperty InterfaceDescription");
+    if (p.waitForFinished(3000)) {
+        QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+        if (!out.isEmpty()) {
+            QStringList lines = out.split(QRegularExpression("[\r\n]+"), Qt::SkipEmptyParts);
+            for (const QString &line : lines) {
+                QString item = line.trimmed();
+                if (!item.isEmpty() && !rawList.contains(item)) {
+                    rawList.append(item);
+
+                    // 복잡한 칩셋 명칭 대신 직관적인 아이콘과 연결 유형 함께 표기
+                    QString lower = item.toLower();
+                    if (lower.contains("wi-fi") || lower.contains("wireless") || lower.contains("wlan") ||
+                        lower.contains("802.11") || lower.contains("8852") || lower.contains("ax2") || lower.contains("wifi")) {
+                        displayList.append(QString("📶 Wi-Fi (%1)").arg(item));
+                    } else if (lower.contains("ethernet") || lower.contains("gbe") || lower.contains("gigabit") ||
+                               lower.contains("pcie") || lower.contains("family controller") || lower.contains("lan")) {
+                        displayList.append(QString("🔌 이더넷 (%1)").arg(item));
+                    } else {
+                        displayList.append(QString("🌐 %1").arg(item));
+                    }
+                }
+            }
+        }
+    }
+#endif
+
+    // Fallback: 물리 랜카드가 감지되지 않은 경우의 기본 목록
+    if (rawList.size() <= 1) {
+        rawList.append("Realtek 8852CE WiFi 6E PCI-E NIC");
+        displayList.append("📶 Wi-Fi (Realtek 8852CE WiFi 6E PCI-E NIC)");
+        rawList.append("Realtek PCIe GbE Family Controller");
+        displayList.append("🔌 이더넷 (Realtek PCIe GbE Family Controller)");
+    }
+
+    m_nicRawList = rawList;
+    if (m_nicList != displayList) {
+        m_nicList = displayList;
+        emit nicListChanged();
+    }
+
+    // 2. 역매칭(Reverse Matching) 및 Edge Case 방어
+    if (m_targetAdapter.isEmpty() || m_targetAdapter == "AUTO" || m_targetAdapter == "자동 감지") {
+        m_nicIndex = 0;
+        m_targetAdapter = "AUTO";
+        emit nicIndexChanged();
+        emit targetAdapterChanged();
+    } else {
+        int idx = m_nicRawList.indexOf(m_targetAdapter);
+        if (idx != -1) {
+            m_nicIndex = idx;
+            emit nicIndexChanged();
+        } else {
+            // ⚠️ [Edge Case 방어]: 사용자의 환경 변화(외장 랜카드 분리, USB 테더링 해제 등)로 이전 장치를 못 찾으면
+            // 인덱스 오류가 나지 않도록 무조건 0번(자동 감지)으로 Fallback 처리!
+            qWarning() << "[BackendManager] Saved adapter not found in current hardware. Falling back to AUTO (0):" << m_targetAdapter;
+            m_nicIndex = 0;
+            m_targetAdapter = "AUTO";
+            emit nicIndexChanged();
+            emit targetAdapterChanged();
+            saveWhitelistFile(); // 갱신된 AUTO 상태 저장
+        }
+    }
+}
+
+void BackendManager::selectNetworkAdapter(int index)
+{
+    if (index >= 0 && index < m_nicRawList.size()) {
+        m_nicIndex = index;
+        m_targetAdapter = m_nicRawList[index]; // 0번이면 "AUTO", 1번 이상이면 실제 하드웨어 식별자
+        emit nicIndexChanged();
+        emit targetAdapterChanged();
+        saveWhitelistFile();
+        qDebug() << "[BackendManager] NIC adapter selected:" << m_targetAdapter << "(" << m_nicList[index] << ")";
+
+        // 엔진이 구동 중이면 새 어댑터 적용을 위해 재시작 안내/자동 재기동
+        if (m_isEngineRunning) {
+            restartEngine();
+        }
+    }
+}
+
+void BackendManager::setNicIndex(int v)
+{
+    if (m_nicIndex != v) {
+        selectNetworkAdapter(v);
+    }
+}
+
+void BackendManager::setTargetAdapter(const QString &v)
+{
+    if (m_targetAdapter != v) {
+        m_targetAdapter = v;
+        emit targetAdapterChanged();
+        saveWhitelistFile();
+    }
 }
 

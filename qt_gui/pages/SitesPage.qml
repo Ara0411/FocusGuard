@@ -8,6 +8,65 @@ Item {
     property int tabIndex: 0
     readonly property var activeModel: tabIndex === 0 ? root.policyWhiteModel : (tabIndex === 1 ? root.policyBlackModel : root.policyProcessModel)
     property int catIndex: 0
+    property var selectedItems: []
+
+    onTabIndexChanged: {
+        selectedItems = []
+    }
+
+    function isItemSelected(s) {
+        return selectedItems.indexOf(s) !== -1
+    }
+
+    function toggleItemSelection(s, isChecked) {
+        var copy = selectedItems.slice()
+        var idx = copy.indexOf(s)
+        if (isChecked && idx === -1) {
+            copy.push(s)
+        } else if (!isChecked && idx !== -1) {
+            copy.splice(idx, 1)
+        }
+        selectedItems = copy
+    }
+
+    function toggleSelectAll(selectAll) {
+        if (!selectAll) {
+            selectedItems = []
+            return
+        }
+        var all = []
+        for (var i = 0; i < activeModel.count; ++i) {
+            var item = activeModel.get(i)
+            if (item && item.site) {
+                all.push(item.site)
+            }
+        }
+        selectedItems = all
+    }
+
+    function deleteSelected() {
+        if (selectedItems.length === 0) return
+        var targets = selectedItems.slice()
+        backend.removeSelectedSites(tabIndex, targets)
+
+        // 로컬 UI 모델에서도 즉시 제거
+        for (var t = 0; t < targets.length; ++t) {
+            var s = targets[t]
+            for (var i = activeModel.count - 1; i >= 0; --i) {
+                if (activeModel.get(i).site === s) {
+                    activeModel.remove(i)
+                }
+            }
+            if (tabIndex === 0) {
+                for (var w = root.whiteListModel.count - 1; w >= 0; --w) {
+                    if (root.whiteListModel.get(w).site === s) {
+                        root.whiteListModel.remove(w)
+                    }
+                }
+            }
+        }
+        selectedItems = []
+    }
 
     function addPolicy(customVal) {
         var v = (customVal !== undefined ? customVal : siteField.text).trim()
@@ -279,32 +338,50 @@ Item {
                             Item { Layout.fillWidth: true }
                             GhostBtn {
                                 height: 30
-                                text: "선택 삭제"
+                                text: pgSites.selectedItems.length > 0 ? ("선택 삭제 (" + pgSites.selectedItems.length + "개)") : "선택 삭제"
                                 glyph: "trash"
-                                fg: "#FB7185"
+                                fg: pgSites.selectedItems.length > 0 ? "#FB7185" : "#6E7A92"
                                 fontSize: 12
+                                enabled: pgSites.selectedItems.length > 0
+                                onClicked: pgSites.deleteSelected()
                             }
                         }
 
                         Item { Layout.preferredHeight: 16 }
 
                         // 테이블 헤더
-                        RowLayout {
+                        Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 30
-                            spacing: 12
-                            CheckBox2 { Layout.preferredWidth: 18 }
-                            Txt { Layout.fillWidth: true; text: pgSites.tabIndex === 2 ? "실행 파일명 (exe)" : "도메인"; font.pixelSize: 12; color: "#7C8699" }
-                            Txt { Layout.preferredWidth: 100; text: "카테고리"; font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
-                            Txt { Layout.preferredWidth: 90;  text: "등록일";   font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
-                            Txt { Layout.preferredWidth: 50;  text: "상태";     font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
-                            Item { Layout.preferredWidth: 36 } // 휴지통 버튼 폭
-                            Item { Layout.preferredWidth: 14 } // 우측 스크롤바 예약 공간
+                            color: "transparent"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 0
+                                anchors.rightMargin: 14
+                                spacing: 12
+
+                                CheckBox2 {
+                                    id: masterCbx
+                                    Layout.preferredWidth: 18
+                                    Layout.alignment: Qt.AlignVCenter
+                                    checked: pgSites.activeModel.count > 0 && pgSites.selectedItems.length === pgSites.activeModel.count
+                                    onToggled: function(val) {
+                                        pgSites.toggleSelectAll(val)
+                                    }
+                                }
+                                Txt { Layout.fillWidth: true; text: pgSites.tabIndex === 2 ? "실행 파일명 (exe)" : "도메인"; font.pixelSize: 12; color: "#7C8699" }
+                                Txt { Layout.preferredWidth: 100; text: "카테고리"; font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
+                                Txt { Layout.preferredWidth: 90;  text: "등록일";   font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
+                                Txt { Layout.preferredWidth: 50;  text: "상태";     font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
+                                Txt { Layout.preferredWidth: 36;  text: "삭제";     font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
+                            }
                         }
 
                         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#1F2836" }
 
                         ListView {
+                            id: siteListView
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.topMargin: 4
@@ -320,6 +397,7 @@ Item {
                                 required property string date
                                 required property string memo
                                 required property bool onDuty
+                                property bool isSelected: pgSites.isItemSelected(siteRow.site)
 
                                 width: ListView.view.width
                                 height: 54
@@ -328,7 +406,7 @@ Item {
                                     anchors.fill: parent
                                     anchors.margins: 1
                                     radius: 8
-                                    color: srHover.hovered ? "#161D2B" : "transparent"
+                                    color: siteRow.isSelected ? "#1C243B" : (srHover.hovered ? "#161D2B" : "transparent")
                                 }
                                 HoverHandler { id: srHover }
 
@@ -338,7 +416,14 @@ Item {
                                     anchors.rightMargin: 14 // 스크롤바와 겹침 방지 여백
                                     spacing: 12
 
-                                    CheckBox2 { Layout.preferredWidth: 18; Layout.alignment: Qt.AlignVCenter }
+                                    CheckBox2 {
+                                        Layout.preferredWidth: 18
+                                        Layout.alignment: Qt.AlignVCenter
+                                        checked: siteRow.isSelected
+                                        onToggled: function(val) {
+                                            pgSites.toggleItemSelection(siteRow.site, val)
+                                        }
+                                    }
 
                                     RowLayout {
                                         Layout.fillWidth: true
@@ -371,12 +456,16 @@ Item {
                                         }
                                     }
 
-                                    Pill {
+                                    Item {
                                         Layout.preferredWidth: 100
-                                        text: siteRow.cat
-                                        fontSize: 10
-                                        fg: root.catColor(siteRow.cat)
-                                        color: root.catBg(siteRow.cat)
+                                        Layout.fillHeight: true
+                                        Pill {
+                                            anchors.centerIn: parent
+                                            text: siteRow.cat
+                                            fontSize: 10
+                                            fg: root.catColor(siteRow.cat)
+                                            color: root.catBg(siteRow.cat)
+                                        }
                                     }
 
                                     Txt {
@@ -388,40 +477,47 @@ Item {
                                         horizontalAlignment: Text.AlignHCenter
                                     }
 
-                                    Toggle {
+                                    Item {
                                         Layout.preferredWidth: 50
-                                        Layout.alignment: Qt.AlignVCenter
-                                        checked: siteRow.onDuty
-                                        onToggled: function(v) {
-                                            pgSites.activeModel.setProperty(siteRow.index, "onDuty", v)
+                                        Layout.fillHeight: true
+                                        Toggle {
+                                            anchors.centerIn: parent
+                                            checked: siteRow.onDuty
+                                            onToggled: function(v) {
+                                                pgSites.activeModel.setProperty(siteRow.index, "onDuty", v)
+                                            }
                                         }
                                     }
 
-                                    Rectangle {
+                                    Item {
                                         Layout.preferredWidth: 36
-                                        Layout.preferredHeight: 30
-                                        Layout.alignment: Qt.AlignVCenter
-                                        radius: 8
-                                        color: delHover.hovered ? "#2A1420" : "transparent"
-                                        HoverHandler { id: delHover; cursorShape: Qt.PointingHandCursor }
-                                        TapHandler {
-                                            onTapped: {
-                                                var targetSite = siteRow.site
-                                                if (pgSites.tabIndex === 0) {
-                                                    backend.removeFromWhitelist(targetSite)
-                                                } else if (pgSites.tabIndex === 1) {
-                                                    backend.removeFromBlacklist(targetSite)
-                                                } else {
-                                                    backend.removeBlockedProcess(targetSite)
-                                                }
-                                                pgSites.activeModel.remove(siteRow.index)
-                                            }
-                                        }
-                                        Icon {
+                                        Layout.fillHeight: true
+                                        Rectangle {
                                             anchors.centerIn: parent
-                                            name: "trash"
-                                            stroke: delHover.hovered ? "#FB7185" : "#5F6879"
-                                            implicitWidth: 16; implicitHeight: 16
+                                            width: 32
+                                            height: 30
+                                            radius: 8
+                                            color: delHover.hovered ? "#2A1420" : "transparent"
+                                            HoverHandler { id: delHover; cursorShape: Qt.PointingHandCursor }
+                                            TapHandler {
+                                                onTapped: {
+                                                    var targetSite = siteRow.site
+                                                    if (pgSites.tabIndex === 0) {
+                                                        backend.removeFromWhitelist(targetSite)
+                                                    } else if (pgSites.tabIndex === 1) {
+                                                        backend.removeFromBlacklist(targetSite)
+                                                    } else {
+                                                        backend.removeBlockedProcess(targetSite)
+                                                    }
+                                                    pgSites.activeModel.remove(siteRow.index)
+                                                }
+                                            }
+                                            Icon {
+                                                anchors.centerIn: parent
+                                                name: "trash"
+                                                stroke: delHover.hovered ? "#FB7185" : "#5F6879"
+                                                implicitWidth: 16; implicitHeight: 16
+                                            }
                                         }
                                     }
                                 }

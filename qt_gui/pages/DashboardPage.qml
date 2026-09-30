@@ -22,8 +22,7 @@ Item {
                 notify: root.notifyCount
                 avatar: (root.userName && root.userName.length > 0) ? root.userName.charAt(0).toUpperCase() : "U"
                 title: "안녕하세요, " + root.userName + " 님! 👋"
-                subtitle: "오늘 <font color='#7B8BFF'><b>" + root.focusHours
-                          + "시간째</b></font> 집중 중입니다! 🔥"
+                subtitle: root.focusSummarySubtitle()
             }
 
         // ---------- 상단 3단 그리드 ----------

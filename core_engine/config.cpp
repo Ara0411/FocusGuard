@@ -13,3 +13,4 @@ PacketPool g_packet_pool;
 HANDLE g_hIocp = NULL;
 PacketTxQueue g_outbound_queue;
 std::atomic<bool> g_is_paused(false);
+std::string g_target_adapter = "";

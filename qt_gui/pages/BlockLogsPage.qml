@@ -152,12 +152,11 @@ Item {
                             anchors.rightMargin: 14
                             spacing: 12
                             Txt { Layout.preferredWidth: 86;  text: "발생 시간";      font.pixelSize: 12; color: "#7C8699" }
-                            Txt { Layout.preferredWidth: 68;  text: "프로토콜";       font.pixelSize: 12; color: "#7C8699" }
-                            Txt { Layout.fillWidth: true;     text: "감지된 SNI 도메인"; font.pixelSize: 12; color: "#7C8699" }
-                            Txt { Layout.preferredWidth: 150; text: "사유";           font.pixelSize: 12; color: "#7C8699" }
-                            Txt { Layout.preferredWidth: 90;  text: "조치";           font.pixelSize: 12; color: "#7C8699" }
-                            Txt { Layout.preferredWidth: 110; text: "관리";           font.pixelSize: 12; color: "#7C8699"
-                                  horizontalAlignment: Text.AlignRight }
+                            Txt { Layout.preferredWidth: 68;  text: "프로토콜";       font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
+                            Txt { Layout.fillWidth: true;     text: "감지된 SNI 도메인 / 실행 앱"; font.pixelSize: 12; color: "#7C8699" }
+                            Txt { Layout.preferredWidth: 150; text: "사유";           font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
+                            Txt { Layout.preferredWidth: 90;  text: "조치";           font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
+                            Txt { Layout.preferredWidth: 110; text: "관리";           font.pixelSize: 12; color: "#7C8699"; horizontalAlignment: Text.AlignHCenter }
                         }
                     }
 
@@ -207,14 +206,18 @@ Item {
                                     font.pixelSize: 12; font.family: "Consolas"; color: "#C4CCDC"
                                 }
 
-                                Pill {
+                                Item {
                                     Layout.preferredWidth: 68
-                                    text: logRow.proto
-                                    fontSize: 10
-                                    fg: logRow.proto === "QUIC" ? "#38BDF8"
-                                        : (logRow.proto === "DNS" ? "#FBBF24"
-                                        : (logRow.proto === "APP" ? "#C084FC" : "#A5B4FC"))
-                                    color: logRow.proto === "APP" ? "#2A1836" : "#1B2230"
+                                    Layout.fillHeight: true
+                                    Pill {
+                                        anchors.centerIn: parent
+                                        text: logRow.proto
+                                        fontSize: 10
+                                        fg: logRow.proto === "QUIC" ? "#38BDF8"
+                                            : (logRow.proto === "DNS" ? "#FBBF24"
+                                            : (logRow.proto === "APP" ? "#C084FC" : "#A5B4FC"))
+                                        color: logRow.proto === "APP" ? "#2A1836" : "#1B2230"
+                                    }
                                 }
 
                                 RowLayout {
@@ -240,36 +243,46 @@ Item {
                                     text: logRow.reason
                                     font.pixelSize: 12
                                     color: "#8B96AC"
+                                    horizontalAlignment: Text.AlignHCenter
                                     elide: Text.ElideRight
                                 }
 
-                                Pill {
+                                Item {
                                     Layout.preferredWidth: 90
-                                    text: logRow.proto === "APP" ? "프로세스 종료" : "TCP RST"
-                                    fontSize: 10
-                                    fg: logRow.proto === "APP" ? "#C084FC" : "#FB7185"
-                                    color: logRow.proto === "APP" ? "#2A1836" : "#2A1420"
+                                    Layout.fillHeight: true
+                                    Pill {
+                                        anchors.centerIn: parent
+                                        text: logRow.proto === "APP" ? "프로세스 종료" : "TCP RST"
+                                        fontSize: 10
+                                        fg: logRow.proto === "APP" ? "#C084FC" : "#FB7185"
+                                        color: logRow.proto === "APP" ? "#2A1836" : "#2A1420"
+                                    }
                                 }
 
-                                GhostBtn {
+                                Item {
                                     Layout.preferredWidth: 110
-                                    Layout.preferredHeight: 30
-                                    text: "예외 허용"
-                                    glyph: "plus"
-                                    fg: "#A5B4FC"
-                                    fontSize: 12
-                                    onClicked: {
-                                        var targetDomain = logRow.domain
-                                        var proto = logRow.proto
-                                        console.log("[BlockLogsPage] exception allow clicked for:", targetDomain, "proto:", proto)
-                                        if (proto === "APP") {
-                                            backend.removeBlockedProcess(targetDomain)
-                                            saveToast.show("'" + targetDomain + "' 앱 차단 해제 완료")
-                                        } else {
-                                            backend.addToWhitelist(targetDomain)
-                                            saveToast.show("'" + targetDomain + "' 예외 허용 등록 완료")
+                                    Layout.fillHeight: true
+                                    GhostBtn {
+                                        anchors.centerIn: parent
+                                        Layout.preferredWidth: 100
+                                        Layout.preferredHeight: 30
+                                        text: "예외 허용"
+                                        glyph: "plus"
+                                        fg: "#A5B4FC"
+                                        fontSize: 12
+                                        onClicked: {
+                                            var targetDomain = logRow.domain
+                                            var proto = logRow.proto
+                                            console.log("[BlockLogsPage] exception allow clicked for:", targetDomain, "proto:", proto)
+                                            if (proto === "APP") {
+                                                backend.removeBlockedProcess(targetDomain)
+                                                saveToast.show("'" + targetDomain + "' 앱 차단 해제 완료")
+                                            } else {
+                                                backend.addToWhitelist(targetDomain)
+                                                saveToast.show("'" + targetDomain + "' 예외 허용 등록 완료")
+                                            }
+                                            root.logTableModel.remove(logRow.index)
                                         }
-                                        root.logTableModel.remove(logRow.index)
                                     }
                                 }
                             }

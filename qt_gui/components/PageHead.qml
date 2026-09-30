@@ -44,7 +44,7 @@ RowLayout {
             color: "#232C3C"
         },
 
-        // 알림
+        // 알림 (벨)
         Rectangle {
             Layout.preferredWidth: 42; Layout.preferredHeight: 42
             radius: 21
@@ -53,15 +53,6 @@ RowLayout {
             HoverHandler { id: bellHover; cursorShape: Qt.PointingHandCursor }
             Icon { anchors.centerIn: parent; name: "bell"; stroke: "#9BA6BC"
                    implicitWidth: 19; implicitHeight: 19 }
-            Rectangle {
-                visible: ph.notify > 0
-                x: 26; y: 3
-                width: 17; height: 17; radius: 8.5
-                color: "#F43F5E"
-                border.width: 2; border.color: "#0D111A"
-                Txt { anchors.centerIn: parent; text: ph.notify
-                      font.pixelSize: 10; font.weight: Font.Bold; color: "#FFFFFF" }
-            }
         },
 
         // 다크모드

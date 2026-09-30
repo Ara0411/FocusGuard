@@ -46,6 +46,7 @@ qt_add_qml_module(FocusNetGuardian
         pages/SitesPage.qml
         pages/AnalyticsPage.qml
         pages/SettingsPage.qml
+        pages/EngineLogPage.qml
 
         # Components
         components/Card.qml
@@ -72,6 +73,10 @@ set_target_properties(FocusNetGuardian PROPERTIES
     WIN32_EXECUTABLE ON
     MACOSX_BUNDLE ON
 )
+
+if (MSVC)
+    target_link_options(FocusNetGuardian PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+endif()
 
 qt_import_qml_plugins(FocusNetGuardian)
 qt_finalize_executable(FocusNetGuardian)
