@@ -25,9 +25,12 @@ void watcher_func() {
     time_t last_time = get_file_mod_time("whitelist.json");
     bool was_paused = false; // 이전 상태 추적
 
-    while (true) {
+    std::cout << "[Watcher] 상태 감시 및 통계 로깅 스레드가 시작되었습니다." << std::endl;
+
+    while (g_is_running.load()) {
         // 1초에 한 번씩 검사 (UI 반응성 향상)
         std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (!g_is_running.load()) break;
 
         // 1. pause.flag 확인 → 휴식/집중 모드 전환 (상대 경로 및 core_engine 서브경로 동시 검사)
         struct stat buffer;
@@ -39,7 +42,6 @@ void watcher_func() {
         }
 
         // 휴식 → 집중 복귀 감지: 커넥션 캐시 전부 초기화
-        // (휴식 중 allowed 된 YouTube 등 기존 소켓을 즉시 차단 대상으로 만들기 위함)
         if (was_paused && !is_paused_now) {
             std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
             allowed_conns.clear();
@@ -95,4 +97,8 @@ void watcher_func() {
         // 5. 통계 데이터 JSON 저장 (UI 렌더링용)
         StatsLogger::GetInstance().SaveToFile("FocusGuard_stats.json");
     }
+
+    // 스레드 종료 시 최종 저장
+    StatsLogger::GetInstance().SaveToFile("FocusGuard_stats.json");
+    std::cout << "[Watcher] 상태 감시 스레드가 종료되었습니다." << std::endl;
 }

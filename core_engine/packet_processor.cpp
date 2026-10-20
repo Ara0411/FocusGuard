@@ -73,7 +73,7 @@ std::string extract_sni(const u_char* payload, int payload_len) {
 
 // DNS QNAME(질의 도메인) 파싱 함수(DNS패킷에서 도메인 추출하여 리턴)
 std::string extract_dns_query(const u_char* payload, int payload_len) {
-    //dns 해더의 크기는 항상 12바이트이기때문에 이를 검사
+    // dns 해더의 크기는 항상 12바이트이기 때문에 이를 검사
     if (payload_len <= 12) return "";
 
     int offset = 12; // DNS 헤더만큼 건너뛰기
@@ -92,10 +92,7 @@ std::string extract_dns_query(const u_char* payload, int payload_len) {
     return domain;
 }
 
-//                  화이트리스트 자동 등록
-// 바로 json파일에 등록하면 병목 현상이 발생하므로 현재 메모리에
-// 로드해놓은 리스트와 비교 후 새로운 것이면 즉시 메모리에 추가
-// 이후 따로 json파일에 추가
+// 화이트리스트 자동 등록 전용 뮤텍스
 static std::mutex g_whitelist_file_mtx;
 
 void add_to_whitelist_safe(const std::string& new_domain) {
@@ -113,406 +110,515 @@ void add_to_whitelist_safe(const std::string& new_domain) {
     }
 
     // 2. whitelist.json 파일 갱신 (전용 뮤텍스로 멀티스레드 파일 경합 보호)
-    try {
-        std::lock_guard<std::mutex> file_lock(g_whitelist_file_mtx);
-        json config_data;
-        {
-            std::ifstream in_f("whitelist.json");
-            if (!in_f.is_open()) return;
-            config_data = json::parse(in_f);
-        }
+    std::lock_guard<std::mutex> file_lock(g_whitelist_file_mtx);
 
-        if (!config_data.contains("allowed_domains")) {
-            config_data["allowed_domains"] = json::array();
-        }
-
-        for (const auto& item : config_data["allowed_domains"]) {
-            if (item.get<std::string>() == new_domain) return;
-        }
-        config_data["allowed_domains"].push_back(new_domain);
-
-        {
-            std::ofstream out_f("whitelist.json");
-            if (out_f.is_open()) {
-                out_f << config_data.dump(2);
-            }
-        }
-
-        // 3. 메모리에 즉시 반영
-        {
-            std::unique_lock<std::shared_mutex> w_lock(g_wl_mutex);
-            whitelist_domains.push_back(new_domain);
-        }
-
-        std::cout << "\n[Auto Whitelist] 💾 연관 도메인 자동 허용 등록: " << new_domain << std::endl;
+    // JSON 파일 읽기
+    std::string filename = "whitelist.json";
+    std::ifstream in_f(filename);
+    if (!in_f.is_open()) {
+        filename = "core_engine/whitelist.json";
+        in_f.open(filename);
     }
-    catch (...) {}
+    if (!in_f.is_open()) {
+        std::cerr << "[Warning] add_to_whitelist_safe: whitelist.json 열기 실패" << std::endl;
+        return;
+    }
+
+    // JSON 파싱 전 유효성 검증
+    std::string raw_json((std::istreambuf_iterator<char>(in_f)), std::istreambuf_iterator<char>());
+    in_f.close();
+    if (!json::accept(raw_json)) {
+        std::cerr << "[Error] add_to_whitelist_safe: whitelist.json 이 유효하지 않은 JSON 형식입니다." << std::endl;
+        return;
+    }
+    json config_data = json::parse(raw_json);
+
+    if (!config_data.contains("allowed_domains")) {
+        config_data["allowed_domains"] = json::array();
+    }
+
+    for (const auto& item : config_data["allowed_domains"]) {
+        if (item.is_string() && item.get<std::string>() == new_domain) return;
+    }
+    config_data["allowed_domains"].push_back(new_domain);
+
+    std::ofstream out_f(filename);
+    if (!out_f.is_open()) {
+        std::cerr << "[Error] add_to_whitelist_safe: whitelist.json 쓰기 실패" << std::endl;
+        return;
+    }
+    out_f << config_data.dump(2);
+    out_f.close();
+
+    // 3. 메모리에 즉시 반영
+    {
+        std::unique_lock<std::shared_mutex> w_lock(g_wl_mutex);
+        whitelist_domains.push_back(new_domain);
+    }
+
+    std::cout << "\n[Auto Whitelist] 💾 연관 도메인 자동 허용 등록: " << new_domain << std::endl;
 }
 
 void load_whitelist() {
-    try {
-        std::ifstream f("whitelist.json");
-        if (!f.is_open()) {
-            f.open("core_engine/whitelist.json");
+    // JSON 파일 열기
+    std::ifstream f("whitelist.json");
+    if (!f.is_open()) {
+        f.open("core_engine/whitelist.json");
+    }
+    if (!f.is_open()) {
+        std::cerr << "[Warning] whitelist.json 파일을 찾을 수 없습니다. 모든 통신이 차단될 수 있습니다. " << std::endl;
+        return;
+    }
+
+    // JSON 파싱 전 유효성 검증 (json::accept으로 예외 없이 파싱 실패 감지)
+    std::string raw_json((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    f.close();
+    if (!json::accept(raw_json)) {
+        std::cerr << "[Error] 화이트리스트 로드 실패: whitelist.json 이 유효하지 않은 JSON 형식입니다." << std::endl;
+        return;
+    }
+    json data = json::parse(raw_json);
+
+    std::vector<std::string> new_wl;
+    std::vector<std::string> new_bl;
+    std::vector<std::string> new_bl_process;
+
+    if (data.contains("allowed_domains")) {
+        for (auto& el : data["allowed_domains"]) {
+            if (el.is_string()) new_wl.push_back(el.get<std::string>());
         }
-        if (f.is_open()) {
-            json data = json::parse(f);
-            std::vector<std::string> new_wl;
-            std::vector<std::string> new_bl;
-            std::vector<std::string> new_bl_process;
-            if (data.contains("allowed_domains")) {
-                for (auto& el : data["allowed_domains"]) {
-                    new_wl.push_back(el.get<std::string>());
-                }
-            }
-            if (data.contains("blocked_domains")) {
-                for (auto& el : data["blocked_domains"]) {
-                    new_bl.push_back(el.get<std::string>());
-                }
-            }
-            if (data.contains("blocked_process")) {
-                for (auto& el : data["blocked_process"]) {
-                    new_bl_process.push_back(el.get<std::string>());
-                }
-            }
-            if (data.contains("target_adapter")) {
-                g_target_adapter = data["target_adapter"].get<std::string>();
-            }
-            
-            // 파싱이 성공적으로 끝난 뒤에만 원본 리스트를 교체 (안전한 업데이트)
-            {
-                std::unique_lock<std::shared_mutex> lock(g_wl_mutex); // 리스트 보호용 뮤텍스 공용 사용
-                whitelist_domains = std::move(new_wl);
-                blacklist_domains = std::move(new_bl);
-                blacklist_process = std::move(new_bl_process);
-            }
-            std::cout << "[Info] 필터 로드 완료: 허용 " << whitelist_domains.size() << "개 / 도메인 차단 " << blacklist_domains.size() << "개 / 앱 차단 " << blacklist_process.size() << "개";
-            if (!g_target_adapter.empty()) {
-                std::cout << " / 지정 어댑터: " << g_target_adapter;
-            }
-            std::cout << std::endl;
-        } else {
-            std::cerr << "[Warning] whitelist.json 파일을 찾을 수 없습니다. 모든 통신이 차단될 수 있습니다. " << std::endl;
+    }
+    if (data.contains("blocked_domains")) {
+        for (auto& el : data["blocked_domains"]) {
+            if (el.is_string()) new_bl.push_back(el.get<std::string>());
         }
-    } catch (const std::exception& e) {
-        std::cerr << "[Error] 화이트리스트 로드 실패: " << e.what() << std::endl;
+    }
+    if (data.contains("blocked_process")) {
+        for (auto& el : data["blocked_process"]) {
+            if (el.is_string()) new_bl_process.push_back(el.get<std::string>());
+        }
+    }
+    if (data.contains("target_adapter") && data["target_adapter"].is_string()) {
+        g_target_adapter = data["target_adapter"].get<std::string>();
+    }
+    if (data.contains("block_unregistered") && data["block_unregistered"].is_boolean()) {
+        g_block_unregistered.store(data["block_unregistered"].get<bool>());
+    } else if (data.contains("block_unknown") && data["block_unknown"].is_boolean()) {
+        g_block_unregistered.store(data["block_unknown"].get<bool>());
+    }
+
+    // 파싱이 성공적으로 끝난 뒤에만 원본 리스트를 교체 (안전한 업데이트)
+    {
+        std::unique_lock<std::shared_mutex> lock(g_wl_mutex); // 리스트 보호용 뮤텍스 공용 사용
+        whitelist_domains = std::move(new_wl);
+        blacklist_domains = std::move(new_bl);
+        blacklist_process = std::move(new_bl_process);
+    }
+    std::cout << "[Info] 필터 로드 완료: 허용 " << whitelist_domains.size() << "개 / 도메인 차단 " << blacklist_domains.size() << "개 / 앱 차단 " << blacklist_process.size() << "개";
+    if (!g_target_adapter.empty()) {
+        std::cout << " / 지정 어댑터: " << g_target_adapter;
+    }
+    std::cout << " / 미등록 사이트 차단: [" << (g_block_unregistered.load() ? "ON (화이트리스트 모드)" : "OFF (블랙리스트 모드)") << "]";
+    std::cout << std::endl;
+}
+
+// ── 미등록 사이트 차단 모드 설정 및 토글 함수 ──
+void set_block_unregistered(bool enable, bool save_to_file) {
+    bool prev = g_block_unregistered.exchange(enable);
+    if (prev == enable) {
+        std::cout << "\n[Info] 미등록 사이트 차단 모드가 이미 [" << (enable ? "ON" : "OFF") << "] 상태입니다." << std::endl;
+        return;
+    }
+
+    std::cout << "\n========================================================" << std::endl;
+    if (enable) {
+        std::cout << "[모드 변경] 🛡️ 미등록 사이트 차단: [ ON ] (화이트리스트 모드)" << std::endl;
+        std::cout << "           -> 허용 목록(whitelist)에 등록된 사이트만 접속 가능합니다." << std::endl;
+        // 허용되었던 기존 세션 캐시 정리하여 즉시 차단 적용
+        std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+        allowed_conns.clear();
+        pending_conns.clear();
+    } else {
+        std::cout << "[모드 변경] 🔓 미등록 사이트 차단: [ OFF ] (블랙리스트 전용 모드)" << std::endl;
+        std::cout << "           -> 차단 목록(blacklist) 외 모든 사이트 접속이 허용됩니다." << std::endl;
+        // 차단되었던 미등록 세션 캐시 정리하여 즉시 통신 재개
+        std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+        blocked_conns.clear();
+        pending_conns.clear();
+    }
+    std::cout << "========================================================\n" << std::endl;
+
+    if (save_to_file) {
+        std::lock_guard<std::mutex> file_lock(g_whitelist_file_mtx);
+        std::string filename = "whitelist.json";
+        std::ifstream in_f(filename);
+        if (!in_f.is_open()) {
+            filename = "core_engine/whitelist.json";
+            in_f.open(filename);
+        }
+        if (in_f.is_open()) {
+            std::string raw_json((std::istreambuf_iterator<char>(in_f)), std::istreambuf_iterator<char>());
+            in_f.close();
+            if (json::accept(raw_json)) {
+                json config_data = json::parse(raw_json);
+                config_data["block_unregistered"] = enable;
+                std::ofstream out_f(filename);
+                if (out_f.is_open()) {
+                    out_f << config_data.dump(2);
+                    out_f.close();
+                    std::cout << "[Info] whitelist.json에 'block_unregistered': " << (enable ? "true" : "false") << " 설정이 저장되었습니다." << std::endl;
+                }
+            }
+        }
     }
 }
 
+void toggle_block_unregistered() {
+    bool current = g_block_unregistered.load();
+    set_block_unregistered(!current, true);
+}
+
 // ============================================================
-// [Step 4-A] packet_handler: Producer 역할만 담당
-//
-// 변경 전 (단일 스레드):
-//   packet_handler = 수신 + SNI 분석 + 화이트리스트 검사 + RST 발사
-//   → 모든 작업이 직렬로 실행되어 처리 중 다음 패킷 수신 불가
-//
-// 변경 후 (멀티스레드):
-//   packet_handler = 수신 + Queue에 push (3줄로 단순화)
-//   → 수신 직후 복사본을 Queue에 넣고 즉시 반환
-//   → 다음 패킷을 지체 없이 바로 수신할 수 있음
-//
-// 주의: param으로 넘어오는 adhandle은 더 이상 여기서 사용하지 않음
-//       RST 발사는 consumer_func에서 전역 adhandle을 통해 수행함
+// packet_handler: Producer 역할만 담당
+// 수신 직후 메모리 풀에서 객체를 할당받아 IOCP 큐에 넣고 즉시 반환
 // ============================================================
 void packet_handler(u_char* /*param*/, const struct pcap_pkthdr* header, const u_char* pkt_data) {
+    if (!g_is_running.load()) return;
+
     total_captured_cnt++; // 캡처될 때마다 1씩 증가
 
-    try {
-        // 1. 메모리 풀에서 객체 하나 빌려오기
-        CapturedPacket* pkt = g_packet_pool.Acquire();
-        
-        // 2. 패킷 데이터를 객체에 복사
-        pkt->SetData(header, pkt_data);
+    // 1. 메모리 풀에서 객체 하나 빌려오기
+    CapturedPacket* pkt = g_packet_pool.Acquire();
+    if (pkt == nullptr) {
+        std::cerr << "[Error] packet_handler: 메모리 풀 고갈 (패킷 드랍)" << std::endl;
+        return;
+    }
 
-        // 3. IOCP 큐에 패킷 포인터를 넘기고 즉시 반환 (비동기 통지)
-        // OS 커널이 Consumer 스레드들을 관리하며 패킷을 전달해 줍니다.
-        // 진정한 Overlapped I/O 패러다임에 맞춰 LPOVERLAPPED 인자를 통해 객체를 전달합니다.
-        PostQueuedCompletionStatus(g_hIocp, 0, 0, (LPOVERLAPPED)pkt);
-    } catch (...) {
-        // 메모리 풀 고갈 등 예외 발생 시 현재 패킷 드랍 (안전 무시)
+    // 2. 패킷 데이터를 객체에 복사
+    pkt->SetData(header, pkt_data);
+
+    // 3. IOCP 큐에 패킷 포인터를 넘기고 즉시 반환 (비동기 통지)
+    if (!PostQueuedCompletionStatus(g_hIocp, 0, 0, (LPOVERLAPPED)pkt)) {
+        std::cerr << "[Error] packet_handler: PostQueuedCompletionStatus 실패, 패킷 드랍" << std::endl;
+        g_packet_pool.Release(pkt);
     }
 }
 
 // ============================================================
 // consumer_func: IOCP 기반 병렬 패킷 처리 워커(Worker) 스레드
-//
-// IOCP 큐(g_hIocp)에서 대기하며 OS로부터 패킷을 할당받아
-// SNI 분석 후 허용/차단 여부를 판정하고 RST 패킷을 발사합니다.
 // ============================================================
 void consumer_func(pcap_t* adhandle) {
-    while (true) {
-        try {
-            DWORD bytesTransferred = 0;
-            ULONG_PTR completionKey = 0;
-            LPOVERLAPPED pOverlapped = NULL;
+    while (g_is_running.load()) {
+        DWORD bytesTransferred = 0;
+        ULONG_PTR completionKey = 0;
+        LPOVERLAPPED pOverlapped = NULL;
 
-            // IOCP 큐에서 패킷 대기 (여러 스레드가 대기하더라도 OS가 알아서 충돌 없이 분배함)
-            BOOL bRet = GetQueuedCompletionStatus(g_hIocp, &bytesTransferred, &completionKey, &pOverlapped, INFINITE);
+        // IOCP 큐에서 패킷 대기 (종료 감지를 위해 500ms 타임아웃 지정)
+        BOOL bRet = GetQueuedCompletionStatus(g_hIocp, &bytesTransferred, &completionKey, &pOverlapped, 500);
+        
+        // 정상 종료 키 감지 또는 프로그램 종료 상태 시 워커 루프 종료
+        if (completionKey == EXIT_COMPLETION_KEY || !g_is_running.load()) {
+            if (pOverlapped != NULL) {
+                g_packet_pool.Release((CapturedPacket*)pOverlapped);
+            }
+            break;
+        }
+
+        // 타임아웃이나 빈 포인터인 경우 계속 대기
+        if (!bRet || pOverlapped == NULL) continue;
+
+        // LPOVERLAPPED 포인터를 CapturedPacket 객체로 캐스팅
+        CapturedPacket* pkt = (CapturedPacket*)pOverlapped;
+
+        // RAII 래퍼: 풀 반환 보장
+        struct PktReleaser {
+            CapturedPacket* p;
+            ~PktReleaser() { if (p) g_packet_pool.Release(p); }
+        } releaser{pkt};
+
+        // 꺼낸 패킷의 원시 바이트 포인터와 헤더 참조
+        const u_char* pkt_data = pkt->raw_data.data();
+        const struct pcap_pkthdr* header = &pkt->header;
+
+        // ── 패킷 기본 길이 유효성 검사 ──
+        if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header)) continue;
+
+        // 일시정지 상태(휴식 모드)면 모든 패킷 통과
+        if (g_is_paused.load()) {
+            continue;
+        }
+
+        // 1. 이더넷 헤더 매핑
+        struct pkt_eth_header* eth = (struct pkt_eth_header*)pkt_data;
+
+        // IPv4 패킷인지 확인 (0x0800)
+        if (ntohs(eth->eth_type) != 0x0800) continue;
+
+        // 2. IP 헤더 매핑
+        struct pkt_ip_header* ip = (struct pkt_ip_header*)(pkt_data + sizeof(struct pkt_eth_header));
+        int ip_len = (ip->ver_ihl & 0xf) * 4;
+        if (ip_len < 20 || pkt->raw_data.size() < sizeof(struct pkt_eth_header) + ip_len) continue;
+
+        // ── 위조 패킷 자가 수신(루프백) 방지 ──
+        if (ip->identification == htons(54321) || 
+            ip->identification == htons(12345) || 
+            ip->identification == htons(12346)) {
+            continue;
+        }
+
+        // IP 주소 추출
+        uint32_t src_ip = *(uint32_t*)&ip->saddr;
+        uint32_t dst_ip = *(uint32_t*)&ip->daddr;
+
+        char src_ip_str[16];
+        char dst_ip_str[16];
+        sprintf_s(src_ip_str, "%d.%d.%d.%d", ip->saddr.byte1, ip->saddr.byte2, ip->saddr.byte3, ip->saddr.byte4);
+        sprintf_s(dst_ip_str, "%d.%d.%d.%d", ip->daddr.byte1, ip->daddr.byte2, ip->daddr.byte3, ip->daddr.byte4);
+
+        // UDP 패킷인지 확인 (proto == 17)
+        if (ip->proto == 17) {
+            if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + ip_len + sizeof(struct pkt_udp_header)) continue;
+            struct pkt_udp_header* udp = (struct pkt_udp_header*)((u_char*)ip + ip_len);
+            int dest_port = ntohs(udp->dport);
+            int udp_len = ntohs(udp->len);
             
-            // 에러나 널 포인터는 무시 (이제 객체는 OVERLAPPED 포인터로 들어옵니다)
-            if (!bRet || pOverlapped == NULL) continue;
-
-            // LPOVERLAPPED 포인터를 CapturedPacket 객체로 캐스팅
-            CapturedPacket* pkt = (CapturedPacket*)pOverlapped;
-
-            // RAII 래퍼: 이 스코프 내에서 continue; 로 빠져나가더라도 
-            // 무조건 풀에 반환되도록 하여 메모리 누수(풀 고갈) 방지
-            struct PktReleaser {
-                CapturedPacket* p;
-                ~PktReleaser() { if (p) g_packet_pool.Release(p); }
-            } releaser{pkt};
-
-            // 꺼낸 패킷의 원시 바이트 포인터와 헤더 참조
-            const u_char* pkt_data = pkt->raw_data.data();
-            const struct pcap_pkthdr* header = &pkt->header;
-
-            // ── 패킷 기본 길이 유효성 검사 ──
-            if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header)) continue;
-
-            // 일시정지 상태(휴식 모드)면 모든 패킷 통과
-            if (g_is_paused.load()) {
+            // UDP 443 (QUIC) 포트인 경우 ICMP 도달 불가 메시지를 쏘아 TCP로 Fallback 유도
+            if (dest_port == 443) {
+                queue_spoofed_icmp_unreachable(pkt_data, header->caplen);
                 continue;
             }
 
-            // 1. 이더넷 헤더 매핑
-            struct pkt_eth_header* eth = (struct pkt_eth_header*)pkt_data;
+            // UDP 53 (DNS) 처리: 차단 없이 도메인 탐지 로그 출력
+            if (dest_port == 53) {
+                int udp_header_len = 8;
+                int dns_payload_len = udp_len - udp_header_len;
 
-            // IPv4 패킷인지 확인 (0x0800)
-            if (ntohs(eth->eth_type) != 0x0800) continue;
+                if (dns_payload_len > 12) {
+                    const u_char* dns_payload = (const u_char*)udp + udp_header_len;
+                    std::string queried_domain = extract_dns_query(dns_payload, dns_payload_len);
 
-            // 2. IP 헤더 매핑
-            struct pkt_ip_header* ip = (struct pkt_ip_header*)(pkt_data + sizeof(struct pkt_eth_header));
-            int ip_len = (ip->ver_ihl & 0xf) * 4;
-            if (ip_len < 20 || pkt->raw_data.size() < sizeof(struct pkt_eth_header) + ip_len) continue;
+                    if (!queried_domain.empty()) {
+                        std::cout << "\n[Thread " << std::this_thread::get_id() << "] [DNS Sniff] 🔍 "
+                            << src_ip_str << " -> " << dst_ip_str
+                            << " | 도메인: " << queried_domain << std::endl;
 
-            // ── 위조 패킷 자가 수신(루프백) 방지 ──
-            // 우리가 발송한 위조 RST/ICMP 패킷은 고유 ID를 가짐. 이를 무시하지 않으면
-            // 방금 쏜 위조 RST 패킷이 곧바로 이 스레드로 다시 들어와 차단 캐시를 지워버리는 치명적 버그가 발생함.
-            if (ip->identification == htons(54321) || 
-                ip->identification == htons(12345) || 
-                ip->identification == htons(12346)) {
-                continue;
-            }
+                        // ── 화이트리스트 파생 도메인 자동 수집 ──
+                        std::string matched_parent = "";
+                        {
+                            std::shared_lock<std::shared_mutex> r_lock(g_wl_mutex);
 
-            // IP 주소 추출
-            uint32_t src_ip = *(uint32_t*)&ip->saddr;
-            uint32_t dst_ip = *(uint32_t*)&ip->daddr;
+                            // 먼저 블랙리스트 도메인의 서브도메인인지 확인 (오염 방지)
+                            bool is_blacklist_subdomain = false;
+                            for (const auto& b : blacklist_domains) {
+                                std::string bl_suffix = "." + b;
+                                if (queried_domain.length() > bl_suffix.length() &&
+                                    queried_domain.compare(queried_domain.length() - bl_suffix.length(), bl_suffix.length(), bl_suffix) == 0) {
+                                    is_blacklist_subdomain = true;
+                                    break;
+                                }
+                                if (queried_domain == b) {
+                                    is_blacklist_subdomain = true;
+                                    break;
+                                }
+                            }
 
-            char src_ip_str[16];
-            char dst_ip_str[16];
-            sprintf_s(src_ip_str, "%d.%d.%d.%d", ip->saddr.byte1, ip->saddr.byte2, ip->saddr.byte3, ip->saddr.byte4);
-            sprintf_s(dst_ip_str, "%d.%d.%d.%d", ip->daddr.byte1, ip->daddr.byte2, ip->daddr.byte3, ip->daddr.byte4);
-
-            // UDP 패킷인지 확인 (proto == 17)
-            if (ip->proto == 17) {
-                if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + ip_len + sizeof(struct pkt_udp_header)) continue;
-                struct pkt_udp_header* udp = (struct pkt_udp_header*)((u_char*)ip + ip_len);
-                int dest_port = ntohs(udp->dport);
-                int udp_len = ntohs(udp->len);
-                
-                // UDP 443 (QUIC) 포트인 경우 ICMP 도달 불가 메시지를 쏘아 TCP로 Fallback 유도
-                if (dest_port == 443) {
-                    queue_spoofed_icmp_unreachable(pkt_data, header->caplen);
-                    continue;
-                }
-
-                // UDP 53 (DNS) 처리: 차단 없이 도메인 탐지 로그 출력
-                if (dest_port == 53) {
-                    int udp_header_len = 8;
-                    int dns_payload_len = udp_len - udp_header_len;
-
-                    if (dns_payload_len > 12) {
-                        const u_char* dns_payload = (const u_char*)udp + udp_header_len;
-                        std::string queried_domain = extract_dns_query(dns_payload, dns_payload_len);
-
-                        if (!queried_domain.empty()) {
-                            std::cout << "\n[Thread " << std::this_thread::get_id() << "] [DNS Sniff] 🔍 "
-                                << src_ip_str << " -> " << dst_ip_str
-                                << " | 도메인: " << queried_domain << std::endl;
-
-                            // ── 화이트리스트 파생 도메인 자동 수집 ── ###알고리즘 이상한걸로 되어있어요###
-                            std::string matched_parent = "";
-                            {
-                                std::shared_lock<std::shared_mutex> r_lock(g_wl_mutex);
+                            // 블랙리스트와 무관한 경우에만 화이트리스트 서브도메인 검사
+                            if (!is_blacklist_subdomain) {
                                 for (const auto& w : whitelist_domains) {
-                                    // 1. 서브도메인 검사 (play.google.com -> google.com)
                                     std::string suffix = "." + w;
                                     if (queried_domain.length() > suffix.length() &&
                                         queried_domain.compare(queried_domain.length() - suffix.length(), suffix.length(), suffix) == 0) {
                                         matched_parent = w;
                                         break;
                                     }
-
-                                    // 2. 국가별 TLD 검사 (google.co.kr -> google.com)
-                                    std::string root_name = w.substr(0, w.find('.'));
-                                    if (queried_domain.find(root_name + ".") != std::string::npos) {
-                                        matched_parent = w;
-                                        break;
-                                    }
                                 }
                             }
+                        }
 
-                            // 등록된 화이트리스트 사이트의 파생 도메인이면 자동 그룹 저장
-                            if (!matched_parent.empty() && queried_domain != matched_parent) {
-                                add_to_whitelist_safe(queried_domain);
-                            }
+                        // 등록된 화이트리스트 사이트의 직접 서브도메인이면 자동 등록
+                        if (!matched_parent.empty() && queried_domain != matched_parent) {
+                            add_to_whitelist_safe(queried_domain);
                         }
                     }
-                    continue; // DNS 패킷은 차단하지 않고 정상 통과시킴
                 }
-                continue;
+                continue; // DNS 패킷은 차단하지 않고 정상 통과시킴
             }
+            continue;
+        }
 
-            // TCP 패킷인지 확인 (proto == 6)
-            if (ip->proto != 6) continue;
-            if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + ip_len + sizeof(struct pkt_tcp_header)) continue;
+        // TCP 패킷인지 확인 (proto == 6)
+        if (ip->proto != 6) continue;
+        if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + ip_len + sizeof(struct pkt_tcp_header)) continue;
 
-            struct pkt_tcp_header* tcp = (struct pkt_tcp_header*)((u_char*)ip + ip_len);
+        struct pkt_tcp_header* tcp = (struct pkt_tcp_header*)((u_char*)ip + ip_len);
 
-            int dest_port = ntohs(tcp->dport);
-            // 80(HTTP), 443(HTTPS) 포트만 처리
-            if (dest_port != 80 && dest_port != 443) continue;
+        int dest_port = ntohs(tcp->dport);
+        // 80(HTTP), 443(HTTPS) 포트만 처리
+        if (dest_port != 80 && dest_port != 443) continue;
 
-            // 커넥션 ID 생성 (Server IP + Client Port)
-            // src_ip 대신 dst_ip를 사용하여 포트 재사용 시 다른 목적지와의 충돌 방지
-            uint64_t conn_id = ((uint64_t)dst_ip << 32) | ntohs(tcp->sport);
+        // 커넥션 ID 생성 (Server IP + Client Port)
+        uint64_t conn_id = ((uint64_t)dst_ip << 32) | ntohs(tcp->sport);
 
-            // ── 연결 종료(FIN, RST) 감지 시 캐시 즉시 삭제 (포트 재사용 꼬임 방지) ──
-            if ((tcp->flags & 0x01) || (tcp->flags & 0x04)) {
+        // ── 연결 종료(FIN, RST) 감지 시 캐시 즉시 삭제 ──
+        if ((tcp->flags & 0x01) || (tcp->flags & 0x04)) {
+            {
                 std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
                 allowed_conns.erase(conn_id);
                 blocked_conns.erase(conn_id);
                 pending_conns.erase(conn_id);
-                if (tcp->flags & 0x04) continue; // 내가 쏜 위조 RST 패킷 무한루프 방지
             }
+            continue;
+        }
 
-            // ── 커넥션 목록 읽기 (shared_lock: 여러 스레드 동시 읽기 허용) ──
+        // ── 허용된 커넥션 목록 읽기 (shared_lock) ──
+        {
+            std::shared_lock<std::shared_mutex> r_lock(g_ip_mutex);
+            if (allowed_conns.count(conn_id) > 0) continue; // 허용된 커넥션 → 즉시 통과
+        }
+
+        // ── SYN 패킷 처리 (새 연결 시도 감지) ──
+        if ((tcp->flags & 0x02) && !(tcp->flags & 0x10)) {
+            std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+            if (blocked_conns.count(conn_id) == 0 && allowed_conns.count(conn_id) == 0) {
+                pending_conns[conn_id] = time(nullptr);
+            }
+            continue; // SYN 패킷 자체는 통과시킴
+        }
+
+        // ── 이미 차단된 커넥션이라면 즉시 RST 주입 ──
+        {
+            std::shared_lock<std::shared_mutex> r_lock(g_ip_mutex);
+            if (blocked_conns.count(conn_id) > 0) {
+                queue_spoofed_rst_packet(pkt_data, header->caplen, "Blocked Connection");
+                continue;
+            }
+        }
+
+        int tcp_len = ((tcp->data_offset >> 4) * 4);
+        int payload_len = ntohs(ip->tlen) - ip_len - tcp_len;
+
+        // 페이로드 없는 핸드셰이크 패킷 (ACK 등) → 통과
+        if (payload_len <= 0) continue;
+
+        const u_char* payload = (const u_char*)tcp + tcp_len;
+        std::string domain = "";
+
+        if (dest_port == 80) {
+            domain = extract_http_host(payload, payload_len);
+        } else if (dest_port == 443) {
+            domain = extract_sni(payload, payload_len);
+        }
+
+        if (!domain.empty()) {
+            // ── 필터링 (블랙리스트 우선 검사, 이후 화이트리스트) ──
+            bool is_blacklisted = false;
+            bool is_whitelisted = false;
             {
-                std::shared_lock<std::shared_mutex> r_lock(g_ip_mutex);
-                if (allowed_conns.count(conn_id) > 0) continue; // 허용된 커넥션 → 즉시 통과
-            }
-
-            // ── SYN 패킷 처리 (새 연결 시도 감지) ──
-            // SYN=0x02, ACK=0x10 → SYN만 있고 ACK 없으면 새 연결
-            if ((tcp->flags & 0x02) && !(tcp->flags & 0x10)) {
-                // ── 커넥션 목록 쓰기 (unique_lock: 단독 접근) ──
-                std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
-                // blocked/allowed 목록에 없을 때만 pending에 등록
-                if (blocked_conns.count(conn_id) == 0 && allowed_conns.count(conn_id) == 0) {
-                    pending_conns[conn_id] = time(nullptr); // 삽입 시각 저장
+                std::shared_lock<std::shared_mutex> r_lock(g_wl_mutex);
+                // 1. 블랙리스트 검사
+                for (const auto& b : blacklist_domains) {
+                    if (domain == b) { is_blacklisted = true; break; }
+                    std::string suffix = "." + b;
+                    if (domain.length() > suffix.length() &&
+                        domain.compare(domain.length() - suffix.length(), suffix.length(), suffix) == 0) {
+                        is_blacklisted = true; break;
+                    }
                 }
-                continue; // SYN 패킷 자체는 통과시킴
-            }
-
-            // ── 이미 차단된 커넥션이라면 즉시 RST 주입 ──
-            {
-                std::shared_lock<std::shared_mutex> r_lock(g_ip_mutex);
-                if (blocked_conns.count(conn_id) > 0) {
-                    queue_spoofed_rst_packet(pkt_data, header->caplen, "Blocked Connection");
-                    continue;
-                }
-            }
-
-            int tcp_len = ((tcp->data_offset >> 4) * 4);
-            int payload_len = ntohs(ip->tlen) - ip_len - tcp_len;
-
-            // 페이로드 없는 핸드쉐이크 패킷 (ACK 등) → 통과
-            if (payload_len <= 0) continue;
-
-            const u_char* payload = (const u_char*)tcp + tcp_len;
-            std::string domain = "";
-
-            if (dest_port == 80) {
-                domain = extract_http_host(payload, payload_len);
-            } else if (dest_port == 443) {
-                domain = extract_sni(payload, payload_len);
-            }
-
-            if (!domain.empty()) {
-                // ── 필터링 (블랙리스트 우선 검사, 이후 화이트리스트) ──
-                bool is_blacklisted = false;
-                bool is_whitelisted = false;
-                {
-                    std::shared_lock<std::shared_mutex> r_lock(g_wl_mutex);
-                    // 1. 블랙리스트 검사
-                    for (const auto& b : blacklist_domains) {
-                        if (domain == b) { is_blacklisted = true; break; }
-                        std::string suffix = "." + b;
+                
+                // 2. 화이트리스트 검사 (블랙리스트에 없을 때만)
+                if (!is_blacklisted) {
+                    for (const auto& w : whitelist_domains) {
+                        if (domain == w) { is_whitelisted = true; break; }
+                        std::string suffix = "." + w;
                         if (domain.length() > suffix.length() &&
                             domain.compare(domain.length() - suffix.length(), suffix.length(), suffix) == 0) {
-                            is_blacklisted = true; break;
+                            is_whitelisted = true; break;
                         }
                     }
-                    
-                    // 2. 화이트리스트 검사 (블랙리스트에 없을 때만)
-                    if (!is_blacklisted) {
-                        for (const auto& w : whitelist_domains) {
-                            if (domain == w) { is_whitelisted = true; break; }
-                            std::string suffix = "." + w;
-                            if (domain.length() > suffix.length() &&
-                                domain.compare(domain.length() - suffix.length(), suffix.length(), suffix) == 0) {
-                                is_whitelisted = true; break;
-                            }
-                        }
-                    }
-                } // g_wl_mutex 해제
+                }
+            } // g_wl_mutex 해제
 
-                if (is_blacklisted) {
-                    // ── 명시적 블랙리스트 도메인 차단 ──
+            // CDN/정적 리소스 패스스루 검사
+            bool is_cdn_passthrough = false;
+            if (!is_blacklisted && !is_whitelisted) {
+                static const std::vector<std::string> cdn_prefixes = {
+                    "cdn.", "static.", "media.", "assets.", "asset.",
+                    "img.", "images.", "image.", "video.", "videos.",
+                    "fonts.", "font.", "files.", "file.",
+                    "upload.", "uploads.", "s3.", "storage.", "cache.",
+                    "res.", "resource.", "resources.", "content.",
+                    "cloud.", "data.", "dl.", "download."
+                };
+                for (const auto& prefix : cdn_prefixes) {
+                    if (domain.length() > prefix.length() &&
+                        domain.compare(0, prefix.length(), prefix) == 0) {
+                        is_cdn_passthrough = true;
+                        break;
+                    }
+                }
+            }
+
+            if (is_blacklisted) {
+                // ── 명시적 블랙리스트 도메인 차단 ──
+                {
+                    std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+                    if (blocked_conns.count(conn_id) == 0) {
+                        pending_conns.erase(conn_id);
+                        blocked_conns[conn_id] = time(nullptr);
+                        std::cout << "\n[Thread " << std::this_thread::get_id() << "] [BLACKLIST HIT] ⛔ 명시적 차단 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                        StatsLogger::GetInstance().LogBlockedConnection(domain);
+                    }
+                }
+                queue_spoofed_rst_packet(pkt_data, header->caplen, domain);
+            }
+            else if (is_whitelisted || is_cdn_passthrough) {
+                // ── 허용 커넥션 등록 ──
+                std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+                if (allowed_conns.count(conn_id) == 0) {
+                    pending_conns.erase(conn_id);
+                    allowed_conns[conn_id] = time(nullptr);
+                    if (is_cdn_passthrough) {
+                        std::cout << "\n[Thread " << std::this_thread::get_id() << "] [CDN Pass] 🌐 CDN 패스스루 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                    } else {
+                        std::cout << "\n[Thread " << std::this_thread::get_id() << "] [Whitelist] ✅ OK 허용 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                    }
+                    StatsLogger::GetInstance().LogNormalConnection();
+                }
+            } else {
+                // ── 화이트리스트에 없는 미등록 도메인 처리 ──
+                bool is_whitelist_active = false;
+                {
+                    std::shared_lock<std::shared_mutex> r_lock(g_wl_mutex);
+                    // 화이트리스트에 1개 이상의 도메인이 있을 때만 "화이트리스트 모드" 조건 성립
+                    is_whitelist_active = !whitelist_domains.empty();
+                }
+
+                // [핵심] 미등록 차단 토글(g_block_unregistered)이 ON이고 화이트리스트가 활성화되어 있을 때만 차단!
+                if (g_block_unregistered.load() && is_whitelist_active) {
                     {
                         std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
                         if (blocked_conns.count(conn_id) == 0) {
-                            pending_conns.erase(conn_id);
-                            blocked_conns[conn_id] = time(nullptr);
-                            std::cout << "\n[Thread " << std::this_thread::get_id() << "] [BLACKLIST HIT] ⛔ 명시적 차단 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                            pending_conns.erase(conn_id); // pending에서 제거
+                            blocked_conns[conn_id] = time(nullptr); // 차단 시각 저장
+                            std::cout << "\n[Thread " << std::this_thread::get_id() << "] [Unknown] ❌ 미등록 차단 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
                             StatsLogger::GetInstance().LogBlockedConnection(domain);
                         }
-                    }
+                    } // g_ip_mutex 해제 후 RST 발사
                     queue_spoofed_rst_packet(pkt_data, header->caplen, domain);
-                }
-                else if (is_whitelisted) {
-                    // ── 허용 커넥션 등록 (쓰기 잠금) ──
+                } else {
+                    // 미등록 차단이 OFF(블랙리스트 모드)이거나 화이트리스트가 비어있는 경우 -> 미등록 사이트 정상 허용 (Pass)
                     std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
                     if (allowed_conns.count(conn_id) == 0) {
-                        pending_conns.erase(conn_id); // pending에서 제거
-                        allowed_conns[conn_id] = time(nullptr); // 허용 시각 저장
-                        std::cout << "\n[Thread " << std::this_thread::get_id() << "] [Whitelist] ✅ OK 허용 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
+                        pending_conns.erase(conn_id);
+                        allowed_conns[conn_id] = time(nullptr);
                         StatsLogger::GetInstance().LogNormalConnection();
                     }
-                } else {
-                    // ── 화이트리스트에 없는 미등록 도메인 처리 ──
-                    bool is_whitelist_active = false;
-                    {
-                        std::shared_lock<std::shared_mutex> r_lock(g_wl_mutex);
-                        // 화이트리스트에 1개 이상의 도메인이 있을 때만 "나머지 전체 차단(White-list 모드)" 작동
-                        is_whitelist_active = !whitelist_domains.empty();
-                    }
-
-                    if (is_whitelist_active) {
-                        {
-                            std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
-                            if (blocked_conns.count(conn_id) == 0) {
-                                pending_conns.erase(conn_id); // pending에서 제거
-                                blocked_conns[conn_id] = time(nullptr); // 차단 시각 저장
-                                std::cout << "\n[Thread " << std::this_thread::get_id() << "] [Unknown] ❌ 미등록 차단 | " << src_ip_str << " -> " << dst_ip_str << " | 도메인: " << domain << std::endl;
-                                StatsLogger::GetInstance().LogBlockedConnection(domain);
-                            }
-                        } // g_ip_mutex 해제 후 RST 발사
-                        queue_spoofed_rst_packet(pkt_data, header->caplen, domain);
-                    } else {
-                        // 화이트리스트가 비어있다면 (JSON 파싱 실패 등), 미등록 도메인을 기본 허용 (Fail-Open)
-                        std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
-                        if (allowed_conns.count(conn_id) == 0) {
-                            pending_conns.erase(conn_id);
-                            allowed_conns[conn_id] = time(nullptr);
-                            // 너무 많은 로그 출력을 방지하기 위해 콘솔 출력 생략
-                            StatsLogger::GetInstance().LogNormalConnection();
-                        }
-                    }
                 }
-            } else {
-                // SNI/Host 없는 데이터 패킷
-                // pending 목록에 있는 커넥션이면 → 도메인 미확인 상태이므로 RST 차단
+            }
+        } else {
+            // SNI/Host 없는 데이터 패킷
+            // 미등록 차단이 켜져 있을 때만 pending/stale 연결 차단 수행
+            if (g_block_unregistered.load()) {
                 bool is_pending = false;
                 {
                     std::shared_lock<std::shared_mutex> r_lock(g_ip_mutex);
@@ -521,8 +627,6 @@ void consumer_func(pcap_t* adhandle) {
                 if (is_pending) {
                     queue_spoofed_rst_packet(pkt_data, header->caplen, "Pending Block");
                 } else {
-                    // 캐시에 없는 기존 연결(SNI 없는 데이터 패킷)
-                    // → 집중 모드에서는 RST로 강제 종료 (휴식 중 allowed된 소켓 즉시 차단)
                     {
                         std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
                         if (blocked_conns.count(conn_id) == 0) {
@@ -531,11 +635,14 @@ void consumer_func(pcap_t* adhandle) {
                     }
                     queue_spoofed_rst_packet(pkt_data, header->caplen, "Stale Connection");
                 }
+            } else {
+                // 미등록 차단이 꺼져 있는 블랙리스트 전용 모드에서는 SNI 없는 패킷도 통과
+                std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+                if (allowed_conns.count(conn_id) == 0) {
+                    pending_conns.erase(conn_id);
+                    allowed_conns[conn_id] = time(nullptr);
+                }
             }
-        } catch (const std::exception& e) {
-            std::cerr << "\n[Error] Worker Thread 내부 예외 발생 (무시하고 계속 실행): " << e.what() << std::endl;
-        } catch (...) {
-            // 알 수 없는 예외 무시
         }
-    } // while(true) 끝
+    } // while(g_is_running.load()) 끝
 } // consumer_func 끝

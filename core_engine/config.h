@@ -154,3 +154,9 @@ extern HANDLE g_hIocp;
 extern PacketTxQueue g_outbound_queue;
 extern std::atomic<bool> g_is_paused; // GUI 휴식 모드 플래그 (pause.flag 파일로 제어)
 extern std::string g_target_adapter; // GUI에서 지정한 우선 캡처 NIC 어댑터명
+
+// ── 신규 추가: 정상 종료 및 미등록 차단 기능 제어용 전역 변수 ──
+extern std::atomic<bool> g_is_running; // 엔진 실행 상태 (false 시 모든 스레드 정상 종료 루틴 진입)
+extern std::atomic<bool> g_block_unregistered; // 미등록 사이트 차단 여부 (true: 화이트리스트 모드, false: 블랙리스트 전용 모드)
+extern pcap_t* g_adhandle; // pcap 핸들 전역 참조 (pcap_breakloop 용)
+constexpr ULONG_PTR EXIT_COMPLETION_KEY = 0xDEADBEEF; // IOCP 워커 스레드 정상 종료용 키
