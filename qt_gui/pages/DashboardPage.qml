@@ -44,9 +44,28 @@ Item {
                     spacing: 0
 
                     RowLayout {
+                        Layout.fillWidth: true
                         spacing: 9
                         Icon { name: "clock"; stroke: "#A5B4FC"; implicitWidth: 19; implicitHeight: 19 }
                         Txt { text: "집중 타이머"; font.pixelSize: 14; font.weight: Font.DemiBold }
+                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            visible: backend.pomodoroRound > 0
+                            height: 22
+                            width: roundTxt.implicitWidth + 14
+                            radius: 6
+                            color: "#1E1B4B"
+                            border.width: 1
+                            border.color: "#4338CA"
+                            Txt {
+                                id: roundTxt
+                                anchors.centerIn: parent
+                                text: "🍅 " + backend.pomodoroRound + "회 완료"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: "#A5B4FC"
+                            }
+                        }
                     }
 
                     Item { Layout.fillHeight: true }
@@ -61,7 +80,9 @@ Item {
                             anchors.fill: parent
                             antialiasing: true
                             property real progress: root.ringProgress
+                            property bool focusing: root.isFocusing
                             onProgressChanged: requestPaint()
+                            onFocusingChanged: requestPaint()
                             onPaint: {
                                 var ctx = getContext("2d")
                                 ctx.reset()
@@ -80,11 +101,17 @@ Item {
 
                                 if (progress <= 0.001) return
 
-                                // 진행 링 (보라 → 블루 그라데이션)
+                                // 진행 링 (집중 중: 보라/블루, 휴식 중: 앰버/오렌지)
                                 var grd = ctx.createLinearGradient(0, 0, width, height)
-                                grd.addColorStop(0.0, "#8B5CF6")
-                                grd.addColorStop(0.5, "#6366F1")
-                                grd.addColorStop(1.0, "#38BDF8")
+                                if (!root.isFocusing) {
+                                    grd.addColorStop(0.0, "#F59E0B")
+                                    grd.addColorStop(0.5, "#D97706")
+                                    grd.addColorStop(1.0, "#B45309")
+                                } else {
+                                    grd.addColorStop(0.0, "#8B5CF6")
+                                    grd.addColorStop(0.5, "#6366F1")
+                                    grd.addColorStop(1.0, "#38BDF8")
+                                }
                                 ctx.strokeStyle = grd
                                 ctx.beginPath()
                                 ctx.arc(cx, cy, r, -Math.PI / 2,
@@ -95,7 +122,7 @@ Item {
 
                         ColumnLayout {
                             anchors.centerIn: parent
-                            spacing: 5
+                            spacing: 8
                             Txt {
                                 Layout.alignment: Qt.AlignHCenter
                                 text: root.hms(root.timerCount)
@@ -103,22 +130,49 @@ Item {
                                 font.weight: Font.DemiBold
                                 font.family: "Consolas"
                                 font.letterSpacing: 0.5
-                                color: "#F4F7FD"
+                                color: root.isFocusing ? "#F4F7FD" : "#FBBF24"
                             }
-                            Txt {
+                            RowLayout {
                                 Layout.alignment: Qt.AlignHCenter
-                                text: root.isFocusing ? "집중 중" : "일시 정지"
-                                font.pixelSize: 13
-                                color: "#8B93FF"
-                            }
-                            Item { Layout.preferredHeight: 16 }
-                            Txt {
-                                Layout.alignment: Qt.AlignHCenter
-                                text: "목표 " + root.hms(root.targetCount)
-                                font.pixelSize: 12
-                                color: "#6A7488"
+                                spacing: 6
+                                Rectangle {
+                                    width: 7; height: 7; radius: 3.5
+                                    color: root.isFocusing ? "#8B93FF" : "#F59E0B"
+                                    SequentialAnimation on opacity {
+                                        running: true; loops: Animation.Infinite
+                                        NumberAnimation { to: 0.3; duration: 900; easing.type: Easing.InOutQuad }
+                                        NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutQuad }
+                                    }
+                                }
+                                Txt {
+                                    text: {
+                                        var rem = backend.pomodoroRemainingSecs
+                                        var m = Math.floor(rem / 60)
+                                        var s = rem % 60
+                                        var remStr = m + ":" + (s < 10 ? "0" : "") + s
+                                        if (root.isFocusing) {
+                                            return "집중 중 🍅 (" + remStr + ")"
+                                        } else {
+                                            return "휴식 중 ☕ (" + remStr + ")"
+                                        }
+                                    }
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: root.isFocusing ? "#8B93FF" : "#FBBF24"
+                                }
                             }
                         }
+                    }
+
+                    Item { Layout.fillHeight: true }
+
+                    Txt {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: backend.pomodoroRound > 0
+                              ? ("목표 " + root.hms(root.targetCount) + " · 🍅 " + backend.pomodoroRound + "회 완료")
+                              : ("목표 " + root.hms(root.targetCount) + " · 뽀모도로 " + backend.pomodoroFocus + "분 / " + backend.pomodoroRest + "분")
+                        font.pixelSize: 11
+                        color: "#6A7488"
                     }
 
                     Item { Layout.fillHeight: true }
@@ -159,9 +213,7 @@ Item {
                             border.color: !root.isFocusing ? "#F59E0B" : "#2A3446"
                             HoverHandler { id: restHover; cursorShape: Qt.PointingHandCursor }
                             TapHandler {
-                                onTapped: {
-                                    if (root.isFocusing) backend.togglePause()
-                                }
+                                onTapped: backend.togglePause()
                             }
                             RowLayout {
                                 anchors.centerIn: parent
@@ -243,7 +295,9 @@ Item {
                             Icon { name: "check-circle"; stroke: "#F43F5E"
                                    implicitWidth: 17; implicitHeight: 17 }
                             Txt {
-                                text: "오늘 차단된 딴짓 : 총 " + root.blockedCount + "회"
+                                text: backend.blockedSessions > 0 && backend.blockedAttempts > backend.blockedSessions
+                                      ? ("오늘 차단된 딴짓 : " + backend.blockedSessions + "회 (" + root.blockedCount + "개 패킷 방어)")
+                                      : ("오늘 차단된 딴짓 : 총 " + root.blockedCount + "회")
                                 font.pixelSize: 13; font.weight: Font.Medium; color: "#FB7185"
                             }
                         }
@@ -622,7 +676,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 9
                     Icon { name: "bars"; stroke: "#A5B4FC"; implicitWidth: 19; implicitHeight: 19 }
-                    Txt { text: "오늘의 집중 통계"; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    Txt { text: "시간대별 차단 현황 (24시간)"; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Item { Layout.fillWidth: true }
 
                     Rectangle {   // 기간 드롭다운
@@ -692,17 +746,30 @@ Item {
                         id: chart
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        clip: true
 
-                        readonly property int maxMin: 60
-                        readonly property real axisLeft: 42
+                        function getChartMax() {
+                            var m = 10;
+                            if (root.hourlyFocus && root.hourlyFocus.length) {
+                                for (var i = 0; i < root.hourlyFocus.length; i++) {
+                                    var v = Number(root.hourlyFocus[i]) || 0;
+                                    if (v > m) m = v;
+                                }
+                            }
+                            var step = m > 100 ? 50 : (m > 40 ? 20 : 10);
+                            return Math.ceil(m / step) * step;
+                        }
+
+                        readonly property int maxVal: getChartMax()
+                        readonly property real axisLeft: 46
                         readonly property real axisBottom: 30
                         readonly property real pinTop: 26
-                        readonly property real plotH: height - axisBottom - pinTop
-                        readonly property real plotW: width - axisLeft
+                        readonly property real plotH: Math.max(1, height - axisBottom - pinTop)
+                        readonly property real plotW: Math.max(1, width - axisLeft)
 
                         // Y축 눈금 + 그리드
                         Repeater {
-                            model: [60, 30, 0]
+                            model: [chart.maxVal, Math.round(chart.maxVal / 2), 0]
                             delegate: Item {
                                 required property int modelData
                                 required property int index
@@ -715,7 +782,7 @@ Item {
                                     width: chart.axisLeft - 10
                                     horizontalAlignment: Text.AlignRight
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData + "분"
+                                    text: modelData + "회"
                                     font.pixelSize: 10
                                     color: "#5F6879"
                                 }
@@ -734,6 +801,7 @@ Item {
                             y: chart.pinTop
                             width: chart.plotW
                             height: chart.plotH
+                            clip: true
                             spacing: 0
 
                             Repeater {
@@ -743,16 +811,17 @@ Item {
                                     required property int index
                                     width: chart.plotW / 24
                                     height: chart.plotH
+                                    clip: true
                                     property bool isNow: index === root.currentHour
-                                    property real val: root.hourlyFocus[index] !== undefined
-                                                       ? root.hourlyFocus[index] : 0
+                                    property real val: (root.hourlyFocus && root.hourlyFocus[index] !== undefined)
+                                                       ? Number(root.hourlyFocus[index]) : 0
 
                                     Rectangle {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         anchors.bottom: parent.bottom
-                                        width: Math.max(8, barCell.width * 0.44)
-                                        height: Math.max(barCell.val > 0 ? 4 : 0,
-                                                         chart.plotH * barCell.val / chart.maxMin)
+                                        width: Math.max(6, barCell.width * 0.44)
+                                        height: Math.min(chart.plotH, Math.max(barCell.val > 0 ? 4 : 0,
+                                                         chart.plotH * (barCell.val / Math.max(1, chart.maxVal))))
                                         radius: 4
                                         gradient: Gradient {
                                             GradientStop {
@@ -766,6 +835,15 @@ Item {
                                         }
                                         Behavior on height { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
                                     }
+
+                                    HoverHandler {
+                                        id: barHover
+                                        cursorShape: barCell.val > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    }
+
+                                    ToolTip.visible: barHover.hovered && barCell.val > 0
+                                    ToolTip.delay: 150
+                                    ToolTip.text: index + "시: " + barCell.val + "회 차단"
                                 }
                             }
                         }

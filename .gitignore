@@ -72,6 +72,14 @@ Testing/
 core_engine/FocusGuard_stats.json
 core_engine/whitelist.json
 qt_gui/user_settings.json
+core_engine/pause.flag
+
+# Secrets & Environment variables
+.env
+*.env
+ai_secrets.json
+*secret*
+*api_key*
 
 # Visual Studio & IDE files
 .vs/

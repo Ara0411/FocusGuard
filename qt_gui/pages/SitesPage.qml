@@ -129,12 +129,6 @@ Item {
                 notify: root.notifyCount
                 title: "접속 정책 및 차단 앱 관리"
                 subtitle: "네트워크 패킷(SNI·DNS)과 Windows 방해 프로세스를 실시간 차단합니다"
-
-                GhostBtn {
-                    height: 42
-                    text: "정책 가져오기"
-                    glyph: "folder"
-                }
             }
 
             // ---------- 탭 스위처 (3단) ----------

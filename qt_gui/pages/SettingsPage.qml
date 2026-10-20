@@ -6,6 +6,27 @@ import "../components"
 Item {
     id: pgSet
 
+    property int currentTargetHours: {
+        var t = backend.targetTime || "03:00:00"
+        var p = t.split(":")
+        return parseInt(p[0]) || 3
+    }
+    property int currentTargetMinutes: {
+        var t = backend.targetTime || "03:00:00"
+        var p = t.split(":")
+        return (p.length > 1) ? (parseInt(p[1]) || 0) : 0
+    }
+    readonly property string targetTimeValue: {
+        var h = (currentTargetHours < 10 ? "0" : "") + currentTargetHours
+        var m = (currentTargetMinutes < 10 ? "0" : "") + currentTargetMinutes
+        return h + ":" + m + ":00"
+    }
+
+    function setTargetHoursAndMinutes(h, m) {
+        currentTargetHours = Math.max(1, Math.min(12, h))
+        currentTargetMinutes = Math.max(0, Math.min(59, m))
+    }
+
     ScrollView {
         anchors.fill: parent
         clip: true
@@ -31,7 +52,7 @@ Item {
                     glyph: "refresh"
                     onClicked: {
                         nameInput.text = "사용자"
-                        targetInput.text = "03:00:00"
+                        pgSet.setTargetHoursAndMinutes(3, 0)
                         root.blockMode = 0
                         root.nicIndex = 0
                         root.rstRetry = 3
@@ -46,6 +67,7 @@ Item {
                     height: 42
                     text: "변경사항 저장"
                     glyph: "save"
+                    bg: "#3B82F6"
                     onClicked: {
                         backend.saveAppSettings(
                             root.blockMode,
@@ -56,7 +78,7 @@ Item {
                             root.autoStart,
                             root.trayOnClose,
                             nameInput.text,
-                            targetInput.text
+                            pgSet.targetTimeValue
                         )
                         saveToast.show("설정이 성공적으로 저장되었습니다")
                     }
@@ -68,7 +90,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.leftMargin: 28
                 Layout.rightMargin: 28
-                Layout.preferredHeight: 104
+                Layout.preferredHeight: 114
 
                 RowLayout {
                     anchors.fill: parent
@@ -97,7 +119,7 @@ Item {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 6
-                            Txt { text: "사용자 프로필 (닉네임)"; font.pixelSize: 12; font.weight: Font.DemiBold; color: "#C3CBDB" }
+                            Txt { text: "사용자 프로필 (닉네임)"; font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0" }
                             Field {
                                 id: nameInput
                                 Layout.fillWidth: true
@@ -117,7 +139,7 @@ Item {
                         color: "#1F2836"
                     }
 
-                    // 일일 목표 섹션
+                    // 일일 목표 섹션 (단순화된 2개 스피너 UI)
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 16
@@ -138,19 +160,103 @@ Item {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 6
+                            spacing: 8
                             RowLayout {
                                 spacing: 8
-                                Txt { text: "일일 목표 집중 시간"; font.pixelSize: 12; font.weight: Font.DemiBold; color: "#C3CBDB" }
-                                Pill { text: "HH:MM:SS"; fg: "#34D399"; color: "#122A22"; fontSize: 10 }
+                                Txt { text: "일일 목표 집중 시간"; font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0" }
+                                Pill { text: pgSet.targetTimeValue; fg: "#34D399"; color: "#122A22"; fontSize: 10 }
                             }
-                            Field {
-                                id: targetInput
+                            RowLayout {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                glyph: "clock"
-                                placeholderText: "03:00:00"
-                                text: backend.targetTime
+                                spacing: 14
+
+                                // 시간(Hour) 스피너
+                                Rectangle {
+                                    Layout.preferredWidth: 136
+                                    Layout.preferredHeight: 40
+                                    radius: 8
+                                    color: "#121A26"
+                                    border.width: 1
+                                    border.color: "#212D42"
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 4
+                                        spacing: 0
+                                        Rectangle {
+                                            width: 32; height: 32; radius: 6
+                                            color: hMinusHover.hovered ? "#212F47" : "transparent"
+                                            HoverHandler { id: hMinusHover; cursorShape: Qt.PointingHandCursor }
+                                            TapHandler { onTapped: pgSet.setTargetHoursAndMinutes(pgSet.currentTargetHours - 1, pgSet.currentTargetMinutes) }
+                                            Txt { anchors.centerIn: parent; text: "−"; font.pixelSize: 15; font.weight: Font.Bold; color: "#A5B4FC" }
+                                        }
+                                        Txt {
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            text: pgSet.currentTargetHours + " 시간"
+                                            font.pixelSize: 13
+                                            font.weight: Font.DemiBold
+                                            color: "#E2E8F0"
+                                        }
+                                        Rectangle {
+                                            width: 32; height: 32; radius: 6
+                                            color: hPlusHover.hovered ? "#212F47" : "transparent"
+                                            HoverHandler { id: hPlusHover; cursorShape: Qt.PointingHandCursor }
+                                            TapHandler { onTapped: pgSet.setTargetHoursAndMinutes(pgSet.currentTargetHours + 1, pgSet.currentTargetMinutes) }
+                                            Txt { anchors.centerIn: parent; text: "+"; font.pixelSize: 15; font.weight: Font.Bold; color: "#A5B4FC" }
+                                        }
+                                    }
+                                }
+
+                                // 분(Minute) 스피너 (15분 단위)
+                                Rectangle {
+                                    Layout.preferredWidth: 136
+                                    Layout.preferredHeight: 40
+                                    radius: 8
+                                    color: "#121A26"
+                                    border.width: 1
+                                    border.color: "#212D42"
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 4
+                                        spacing: 0
+                                        Rectangle {
+                                            width: 32; height: 32; radius: 6
+                                            color: mMinusHover.hovered ? "#212F47" : "transparent"
+                                            HoverHandler { id: mMinusHover; cursorShape: Qt.PointingHandCursor }
+                                            TapHandler {
+                                                onTapped: {
+                                                    var newM = pgSet.currentTargetMinutes - 15
+                                                    if (newM < 0) newM = 45
+                                                    pgSet.setTargetHoursAndMinutes(pgSet.currentTargetHours, newM)
+                                                }
+                                            }
+                                            Txt { anchors.centerIn: parent; text: "−"; font.pixelSize: 15; font.weight: Font.Bold; color: "#34D399" }
+                                        }
+                                        Txt {
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            text: (pgSet.currentTargetMinutes < 10 ? "0" : "") + pgSet.currentTargetMinutes + " 분"
+                                            font.pixelSize: 13
+                                            font.weight: Font.DemiBold
+                                            color: "#E2E8F0"
+                                        }
+                                        Rectangle {
+                                            width: 32; height: 32; radius: 6
+                                            color: mPlusHover.hovered ? "#212F47" : "transparent"
+                                            HoverHandler { id: mPlusHover; cursorShape: Qt.PointingHandCursor }
+                                            TapHandler {
+                                                onTapped: {
+                                                    var newM = pgSet.currentTargetMinutes + 15
+                                                    if (newM > 45) newM = 0
+                                                    pgSet.setTargetHoursAndMinutes(pgSet.currentTargetHours, newM)
+                                                }
+                                            }
+                                            Txt { anchors.centerIn: parent; text: "+"; font.pixelSize: 15; font.weight: Font.Bold; color: "#34D399" }
+                                        }
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
                             }
                         }
                     }
@@ -160,35 +266,45 @@ Item {
             // ---------- 3단 카드 ----------
             RowLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: 28
-                Layout.rightMargin: 28
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
                 Layout.bottomMargin: 28
-                spacing: 20
+                spacing: 16
 
-                // ===== 1. 네트워크 엔진 =====
+                // ===== 1. 네트워크 엔진 설정 =====
                 Card {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 560
+                    Layout.preferredWidth: 340
+                    Layout.preferredHeight: 650
                     Layout.alignment: Qt.AlignTop
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 20
+                        anchors.leftMargin: 20
+                        anchors.rightMargin: 22
+                        anchors.topMargin: 20
+                        anchors.bottomMargin: 20
                         spacing: 0
 
                         CardTitle { label: "네트워크 엔진 설정"; glyph: "cpu"; glyphColor: "#A5B4FC" }
                         Txt {
                             Layout.topMargin: 8
                             Layout.fillWidth: true
-                            text: "Npcap 드라이버가 패킷을 가로채는 방식을 결정합니다"
+                            text: "Npcap 드라이버가 패킷을 가로채고 제어하는 방식을 결정합니다"
                             font.pixelSize: 12; color: "#6A7488"
                             wrapMode: Text.WordWrap
                         }
 
-                        Item { Layout.preferredHeight: 20 }
+                        Item { Layout.preferredHeight: 18 }
 
-                        Txt { text: "차단 모드"; font.pixelSize: 12; font.weight: Font.DemiBold; color: "#C3CBDB" }
-                        Item { Layout.preferredHeight: 10 }
+                        // ── 1. 차단 정책 ──
+                        RowLayout {
+                            spacing: 6
+                            Rectangle { width: 3; height: 12; radius: 1.5; color: "#7B61FF" }
+                            Txt { text: "도메인 필터링 정책"; font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0" }
+                        }
+                        Item { Layout.preferredHeight: 8 }
 
                         Repeater {
                             model: [
@@ -202,9 +318,9 @@ Item {
                                 property bool on: root.blockMode === index
 
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 88
-                                Layout.bottomMargin: 10
-                                radius: 12
+                                Layout.preferredHeight: 78
+                                Layout.bottomMargin: 8
+                                radius: 11
                                 color: on ? "#171F33" : "#121824"
                                 border.width: 1
                                 border.color: on ? "#4550A8" : "#212A38"
@@ -214,21 +330,21 @@ Item {
 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.margins: 15
-                                    spacing: 13
+                                    anchors.margins: 14
+                                    spacing: 12
 
                                     Rectangle {
-                                        Layout.preferredWidth: 19
-                                        Layout.preferredHeight: 19
+                                        Layout.preferredWidth: 18
+                                        Layout.preferredHeight: 18
                                         Layout.alignment: Qt.AlignTop
                                         Layout.topMargin: 2
-                                        radius: 10
+                                        radius: 9
                                         color: "transparent"
                                         border.width: 1.6
                                         border.color: modeCard.on ? "#7B61FF" : "#3A4457"
                                         Rectangle {
                                             anchors.centerIn: parent
-                                            width: 9; height: 9; radius: 5
+                                            width: 8; height: 8; radius: 4
                                             color: "#7B61FF"
                                             visible: modeCard.on
                                         }
@@ -236,7 +352,7 @@ Item {
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
-                                        spacing: 6
+                                        spacing: 4
                                         RowLayout {
                                             spacing: 8
                                             Txt {
@@ -254,8 +370,8 @@ Item {
                                         Txt {
                                             Layout.fillWidth: true
                                             text: modeCard.modelData.d
-                                            font.pixelSize: 12
-                                            lineHeight: 1.35
+                                            font.pixelSize: 11
+                                            lineHeight: 1.3
                                             color: "#6A7488"
                                             wrapMode: Text.WordWrap
                                         }
@@ -264,15 +380,20 @@ Item {
                             }
                         }
 
-                        Item { Layout.preferredHeight: 10 }
+                        // ── 구분선 ──
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#1F2836"; Layout.topMargin: 6; Layout.bottomMargin: 14 }
 
-                        Txt { text: "네트워크 인터페이스 (NIC)"; font.pixelSize: 12
-                              font.weight: Font.DemiBold; color: "#C3CBDB" }
+                        // ── 2. 네트워크 인터페이스 (NIC) ──
+                        RowLayout {
+                            spacing: 6
+                            Rectangle { width: 3; height: 12; radius: 1.5; color: "#38BDF8" }
+                            Txt { text: "네트워크 인터페이스 어댑터 (NIC)"; font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0" }
+                        }
                         Item { Layout.preferredHeight: 4 }
                         Txt {
                             Layout.fillWidth: true
                             Layout.preferredWidth: 0
-                            text: "기본적으로 현재 인터넷 트래픽이 활성화된 네트워크를 자동으로 감지하여 차단합니다."
+                            text: "인터넷 트래픽이 활성화된 네트워크를 자동 감지하거나 수동 지정합니다."
                             font.pixelSize: 11
                             color: "#7E8B9F"
                             wrapMode: Text.WordWrap
@@ -281,7 +402,7 @@ Item {
                         Item { Layout.preferredHeight: 8 }
                         Combo {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 44
+                            Layout.preferredHeight: 42
                             options: root.nicList
                             currentIndex: root.nicIndex
                             onActivated: function(i) {
@@ -295,11 +416,19 @@ Item {
                             }
                         }
 
-                        Item { Layout.preferredHeight: 18 }
+                        // ── 구분선 ──
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#1F2836"; Layout.topMargin: 12; Layout.bottomMargin: 14 }
 
+                        // ── 3. 패킷 최적화 ──
+                        RowLayout {
+                            spacing: 6
+                            Rectangle { width: 3; height: 12; radius: 1.5; color: "#10B981" }
+                            Txt { text: "커널 패킷 주입 최적화"; font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0" }
+                        }
+                        Item { Layout.preferredHeight: 8 }
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 74
+                            Layout.preferredHeight: 70
                             radius: 10
                             color: "#101622"
                             border.width: 1
@@ -307,7 +436,7 @@ Item {
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.margins: 12
+                                anchors.margins: 14
                                 spacing: 12
 
                                 Icon {
@@ -320,7 +449,7 @@ Item {
                                     Txt {
                                         Layout.fillWidth: true
                                         text: "패킷 주입 최적화 (Hairpinning TCP RST)"
-                                        font.pixelSize: 12; font.weight: Font.DemiBold; color: "#C3CBDB"
+                                        font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0"
                                         elide: Text.ElideRight
                                     }
                                     Txt {
@@ -337,15 +466,20 @@ Item {
                     }
                 }
 
-                // ===== 2. 뽀모도로 & 알림 =====
+                // ===== 2. 뽀모도로 타이머 & 알림 =====
                 Card {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 560
+                    Layout.preferredWidth: 380
+                    Layout.preferredHeight: 650
                     Layout.alignment: Qt.AlignTop
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 20
+                        anchors.leftMargin: 20
+                        anchors.rightMargin: 22
+                        anchors.topMargin: 20
+                        anchors.bottomMargin: 20
                         spacing: 0
 
                         CardTitle { label: "뽀모도로 타이머 & 알림"; glyph: "clock"; glyphColor: "#10B981" }
@@ -357,10 +491,10 @@ Item {
                             wrapMode: Text.WordWrap
                         }
 
-                        Item { Layout.preferredHeight: 20 }
+                        Item { Layout.preferredHeight: 18 }
 
-                        Txt { text: "집중 시간"; font.pixelSize: 12; font.weight: Font.DemiBold; color: "#C3CBDB" }
-                        Item { Layout.preferredHeight: 10 }
+                        Txt { text: "집중 시간"; font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0" }
+                        Item { Layout.preferredHeight: 8 }
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
@@ -371,7 +505,7 @@ Item {
                                     required property int modelData
                                     property bool on: root.pomodoroFocus === modelData
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 58
+                                    Layout.preferredHeight: 64
                                     radius: 12
                                     color: on ? "#171F33" : "#121824"
                                     border.width: 1
@@ -384,13 +518,13 @@ Item {
                                         Txt {
                                             Layout.alignment: Qt.AlignHCenter
                                             text: focusOpt.modelData + "분"
-                                            font.pixelSize: 17; font.weight: Font.DemiBold
+                                            font.pixelSize: 18; font.weight: Font.DemiBold
                                             color: focusOpt.on ? "#EDF0FA" : "#8A94A8"
                                         }
                                         Txt {
                                             Layout.alignment: Qt.AlignHCenter
                                             text: focusOpt.modelData === 25 ? "표준 뽀모도로" : "딥 워크"
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             color: focusOpt.on ? "#8B7BFF" : "#5F6879"
                                         }
                                     }
@@ -398,10 +532,10 @@ Item {
                             }
                         }
 
-                        Item { Layout.preferredHeight: 20 }
+                        Item { Layout.preferredHeight: 18 }
 
-                        Txt { text: "휴식 시간"; font.pixelSize: 12; font.weight: Font.DemiBold; color: "#C3CBDB" }
-                        Item { Layout.preferredHeight: 10 }
+                        Txt { text: "휴식 시간"; font.pixelSize: 12; font.weight: Font.Bold; color: "#E2E8F0" }
+                        Item { Layout.preferredHeight: 8 }
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
@@ -412,7 +546,7 @@ Item {
                                     required property int modelData
                                     property bool on: root.pomodoroRest === modelData
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 58
+                                    Layout.preferredHeight: 64
                                     radius: 12
                                     color: on ? "#122A24" : "#121824"
                                     border.width: 1
@@ -425,13 +559,13 @@ Item {
                                         Txt {
                                             Layout.alignment: Qt.AlignHCenter
                                             text: restOpt.modelData + "분"
-                                            font.pixelSize: 17; font.weight: Font.DemiBold
+                                            font.pixelSize: 18; font.weight: Font.DemiBold
                                             color: restOpt.on ? "#EDF0FA" : "#8A94A8"
                                         }
                                         Txt {
                                             Layout.alignment: Qt.AlignHCenter
                                             text: restOpt.modelData === 5 ? "짧은 휴식" : "긴 휴식"
-                                            font.pixelSize: 10
+                                            font.pixelSize: 11
                                             color: restOpt.on ? "#34D399" : "#5F6879"
                                         }
                                     }
@@ -439,21 +573,58 @@ Item {
                             }
                         }
 
-                        Item { Layout.preferredHeight: 22 }
+                        Item { Layout.preferredHeight: 16 }
 
                         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#1F2836" }
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 62
+                            Layout.preferredHeight: 56
                             spacing: 12
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 4
-                                Txt { text: "차단 발생 시 윈도우 토스트 알림"
-                                      font.pixelSize: 12; color: "#D3DAE8" }
-                                Txt { text: "차단된 도메인 이름을 알림 센터에 띄웁니다"
-                                      font.pixelSize: 11; color: "#5F6879" }
+                                Layout.minimumWidth: 0
+                                spacing: 3
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "뽀모도로 집중/휴식 자동 루프"
+                                    font.pixelSize: 12; color: "#D3DAE8"
+                                }
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "시간 도달 시 자동으로 휴식(일시정지) 및 집중 모드로 전환"
+                                    font.pixelSize: 11; color: "#5F6879"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                            Toggle {
+                                Layout.alignment: Qt.AlignVCenter
+                                checked: backend.pomodoroAutoEnabled
+                                onToggled: function(v) { backend.pomodoroAutoEnabled = v }
+                            }
+                        }
+
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#1F2836" }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 56
+                            spacing: 12
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                spacing: 3
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "차단 발생 시 윈도우 토스트 알림"
+                                    font.pixelSize: 12; color: "#D3DAE8"
+                                }
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "차단된 도메인 이름을 알림 센터에 띄웁니다"
+                                    font.pixelSize: 11; color: "#5F6879"
+                                    wrapMode: Text.WordWrap
+                                }
                             }
                             Toggle {
                                 Layout.alignment: Qt.AlignVCenter
@@ -466,17 +637,96 @@ Item {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 62
+                            Layout.preferredHeight: 56
                             spacing: 12
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 4
-                                Txt { text: "사이클 종료 알림음"
-                                      font.pixelSize: 12; color: "#D3DAE8" }
-                                Txt { text: "집중·휴식이 끝날 때 짧은 소리로 알립니다"
-                                      font.pixelSize: 11; color: "#5F6879" }
+                                Layout.minimumWidth: 0
+                                spacing: 3
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "사이클 종료 알림음"
+                                    font.pixelSize: 12; color: "#D3DAE8"
+                                }
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "집중·휴식이 끝날 때 짧은 소리로 알립니다"
+                                    font.pixelSize: 11; color: "#5F6879"
+                                    wrapMode: Text.WordWrap
+                                }
                             }
                             Toggle { Layout.alignment: Qt.AlignVCenter; checked: true }
+                        }
+
+                        // ── 하단 안내 팁 박스 (읽기 전용 Tip 디자인 분리) ──
+                        Item { Layout.preferredHeight: 14 }
+                        Rectangle {
+                            id: tipBox
+                            Layout.fillWidth: true
+                            implicitHeight: tipContentRow.implicitHeight + 24
+                            radius: 9
+                            color: "#0F172A"
+                            border.width: 1
+                            border.color: "#1E293B"
+
+                            RowLayout {
+                                id: tipContentRow
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 14
+                                anchors.rightMargin: 14
+                                anchors.topMargin: 12
+                                spacing: 12
+
+                                Rectangle {
+                                    Layout.preferredWidth: 26
+                                    Layout.preferredHeight: 26
+                                    Layout.alignment: Qt.AlignTop
+                                    Layout.topMargin: 2
+                                    radius: 13
+                                    color: "#1A253A"
+                                    Txt {
+                                        anchors.centerIn: parent
+                                        text: "ℹ"
+                                        font.pixelSize: 13
+                                        font.weight: Font.Bold
+                                        color: "#94A3B8"
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    spacing: 4
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        Txt {
+                                            text: "뽀모도로 권장 루틴"
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                            color: "#FDE68A"
+                                        }
+                                        Pill {
+                                            text: "TIP"
+                                            fontSize: 9
+                                            fg: "#FDE68A"
+                                            color: "#282518"
+                                        }
+                                    }
+
+                                    Txt {
+                                        Layout.fillWidth: true
+                                        text: "표준 4사이클(약 2시간) 몰입 후에는 15~30분의 긴 휴식을 취할 때 도파민 균형과 뇌 피로도 회복에 가장 효과적입니다."
+                                        font.pixelSize: 11
+                                        lineHeight: 1.35
+                                        color: "#94A3B8"
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+                            }
                         }
 
                         Item { Layout.fillHeight: true }
@@ -486,12 +736,17 @@ Item {
                 // ===== 3. 시스템 에이전트 =====
                 Card {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 560
+                    Layout.preferredWidth: 340
+                    Layout.preferredHeight: 650
                     Layout.alignment: Qt.AlignTop
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 20
+                        anchors.leftMargin: 20
+                        anchors.rightMargin: 22
+                        anchors.topMargin: 20
+                        anchors.bottomMargin: 20
                         spacing: 0
 
                         CardTitle { label: "시스템 에이전트"; glyph: "sliders"; glyphColor: "#FBBF24" }
@@ -507,14 +762,23 @@ Item {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 62
+                            Layout.preferredHeight: 56
                             spacing: 12
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 4
-                                Txt { text: "윈도우 시작 시 자동 실행"; font.pixelSize: 12; color: "#D3DAE8" }
-                                Txt { text: "부팅과 함께 감시 엔진을 올립니다"
-                                      font.pixelSize: 11; color: "#5F6879" }
+                                Layout.minimumWidth: 0
+                                spacing: 3
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "윈도우 시작 시 자동 실행"
+                                    font.pixelSize: 12; color: "#D3DAE8"
+                                }
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "부팅과 함께 감시 엔진을 올립니다"
+                                    font.pixelSize: 11; color: "#5F6879"
+                                    wrapMode: Text.WordWrap
+                                }
                             }
                             Toggle {
                                 Layout.alignment: Qt.AlignVCenter
@@ -527,14 +791,23 @@ Item {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 62
+                            Layout.preferredHeight: 56
                             spacing: 12
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 4
-                                Txt { text: "창을 닫으면 트레이로 최소화"; font.pixelSize: 12; color: "#D3DAE8" }
-                                Txt { text: "X 버튼을 눌러도 차단은 계속됩니다"
-                                      font.pixelSize: 11; color: "#5F6879" }
+                                Layout.minimumWidth: 0
+                                spacing: 3
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "창을 닫으면 트레이로 최소화"
+                                    font.pixelSize: 12; color: "#D3DAE8"
+                                }
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "X 버튼을 눌러도 차단은 계속됩니다"
+                                    font.pixelSize: 11; color: "#5F6879"
+                                    wrapMode: Text.WordWrap
+                                }
                             }
                             Toggle {
                                 Layout.alignment: Qt.AlignVCenter
@@ -545,88 +818,107 @@ Item {
 
                         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#1F2836" }
 
-                        Item { Layout.preferredHeight: 20 }
+                        Item { Layout.preferredHeight: 18 }
 
                         Txt { text: "로컬 데이터 (JSON)"; font.pixelSize: 12
-                              font.weight: Font.DemiBold; color: "#C3CBDB" }
+                              font.weight: Font.Bold; color: "#E2E8F0" }
                         Txt {
-                            Layout.topMargin: 6
+                            Layout.topMargin: 4
                             Layout.fillWidth: true
                             text: "집중 기록과 정책은 서버로 전송되지 않고 이 경로에만 저장됩니다."
                             font.pixelSize: 11; color: "#5F6879"
                             wrapMode: Text.WordWrap
                         }
 
-                        Item { Layout.preferredHeight: 12 }
+                        Item { Layout.preferredHeight: 10 }
 
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
                             Field {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 42
+                                Layout.preferredHeight: 40
                                 glyph: "folder"
                                 readOnly: true
                                 text: root.backupPath
                                 color: "#8A94A8"
                             }
                             GhostBtn {
-                                Layout.preferredWidth: 96
-                                Layout.preferredHeight: 42
+                                Layout.preferredWidth: 88
+                                Layout.preferredHeight: 40
                                 text: "찾아보기"
                             }
                         }
 
-                        Item { Layout.preferredHeight: 12 }
+                        Item { Layout.preferredHeight: 10 }
 
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
                             GhostBtn {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 42
+                                Layout.preferredHeight: 40
                                 text: "지금 백업"
                                 glyph: "download"
                                 onClicked: saveToast.show("백업 파일을 저장했습니다")
                             }
                             GhostBtn {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 42
+                                Layout.preferredHeight: 40
                                 text: "복원하기"
                                 glyph: "refresh"
                             }
                         }
 
-                        Item { Layout.preferredHeight: 20 }
+                        // ── 통계 및 차단 기록 초기화 ──
+                        Item { Layout.preferredHeight: 16 }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#1F2836" }
+                        Item { Layout.preferredHeight: 14 }
 
-                        Rectangle {
+                        RowLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 74
-                            radius: 11
-                            color: "#2A1420"
-                            border.width: 1
-                            border.color: "#5A2036"
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: 15
-                                spacing: 12
-                                Icon {
-                                    Layout.alignment: Qt.AlignTop
-                                    Layout.preferredWidth: 18
-                                    Layout.preferredHeight: 18
-                                    name: "alert"; stroke: "#F43F5E"
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 12
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
+                                spacing: 4
+                                Txt {
+                                    text: "통계 및 차단 기록 초기화"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Bold
+                                    color: "#E2E8F0"
                                 }
-                                ColumnLayout {
+                                Txt {
                                     Layout.fillWidth: true
-                                    spacing: 5
-                                    Txt { text: "모든 기록 삭제"; font.pixelSize: 12
-                                          font.weight: Font.DemiBold; color: "#FB7185" }
-                                    Txt {
-                                        Layout.fillWidth: true
-                                        text: "집중 기록·차단 로그·정책이 모두 사라지며 되돌릴 수 없습니다."
-                                        font.pixelSize: 11; color: "#A87088"
-                                        wrapMode: Text.WordWrap
+                                    text: "누적 집중 시간과 차단 로그만 초기화되며, 환경설정은 유지됩니다."
+                                    font.pixelSize: 11
+                                    lineHeight: 1.3
+                                    color: "#64748B"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.preferredWidth: 108
+                                Layout.preferredHeight: 36
+                                Layout.alignment: Qt.AlignVCenter
+                                radius: 8
+                                color: delHover.hovered ? "#4C1D24" : "#24121A"
+                                border.width: 1
+                                border.color: delHover.hovered ? "#F43F5E" : "#7F1D1D"
+                                HoverHandler { id: delHover; cursorShape: Qt.PointingHandCursor }
+                                TapHandler {
+                                    onTapped: {
+                                        saveToast.show("통계 및 차단 기록이 초기화되었습니다.")
                                     }
+                                }
+                                RowLayout {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Icon { name: "trash"; stroke: "#FDA4AF"; implicitWidth: 13; implicitHeight: 13 }
+                                    Txt { text: "기록 초기화"; font.pixelSize: 12; font.weight: Font.DemiBold; color: "#FDA4AF" }
                                 }
                             }
                         }
@@ -680,7 +972,10 @@ Item {
             if (!nameInput.activeFocus) nameInput.text = backend.userName
         }
         function onTargetTimeChanged() {
-            if (!targetInput.activeFocus) targetInput.text = backend.targetTime
+            var t = backend.targetTime || "03:00:00"
+            var p = t.split(":")
+            pgSet.currentTargetHours = parseInt(p[0]) || 3
+            pgSet.currentTargetMinutes = (p.length > 1) ? (parseInt(p[1]) || 0) : 0
         }
     }
 }

@@ -27,18 +27,6 @@ Item {
                 notify: root.notifyCount
                 title: "차단 로그 분석"
                 subtitle: "Npcap 엔진이 SNI·DNS 패킷을 실시간 감지 중입니다 · " + (root.blockLogModel.count > 0 ? "최근 차단: " + root.blockLogModel.get(0).time : "실시간 대기 중")
-
-                Combo {
-                    height: 42
-                    width: 118
-                    options: ["오늘", "최근 7일", "전체 기간"]
-                    currentIndex: 0
-                }
-                GhostBtn {
-                    height: 42
-                    text: "로그 내보내기 (CSV)"
-                    glyph: "download"
-                }
             }
 
             // ---------- 요약 3열 ----------

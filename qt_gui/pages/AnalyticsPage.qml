@@ -5,7 +5,6 @@ import "../components"
 
 Item {
     id: pgStats
-    property int period: 1     // 0 일간 / 1 주간 / 2 월간
     readonly property var heatColors: ["#161D2B", "#252C5C", "#3B3499", "#5B4BD6", "#8B74FF"]
 
     ScrollView {
@@ -36,13 +35,6 @@ Item {
                          + (sun.getMonth() + 1) + "월 " + sun.getDate() + "일 · 이번 주 기준"
                 }
                 subtitle: getWeekRange()
-
-                SegTabs {
-                    height: 42
-                    options: ["일간", "주간", "월간"]
-                    currentIndex: pgStats.period
-                    onSelected: function(i) { pgStats.period = i }
-                }
             }
 
             // ---------- 핵심 메트릭 4열 ----------
@@ -73,8 +65,10 @@ Item {
                 Metric {
                     Layout.fillWidth: true
                     label: "방어한 딴짓"
-                    value: backend.blockedAttempts + "회"
-                    sub: "약 " + (backend.blockedSecs > 0 ? root.hm(Math.floor(backend.blockedSecs / 60)) : (backend.blockedAttempts * 3) + "분") + " 절약"
+                    value: (backend.blockedSessions > 0 && backend.blockedAttempts > backend.blockedSessions)
+                           ? (backend.blockedSessions + "회 (" + backend.blockedAttempts + "개)")
+                           : (backend.blockedAttempts + "회")
+                    sub: "약 " + (backend.blockedSecs > 0 ? root.hm(Math.floor(backend.blockedSecs / 60)) : ((backend.blockedSessions > 0 ? backend.blockedSessions : backend.blockedAttempts) * 3) + "분") + " 절약"
                     glyph: "shield-check"
                     accent: "#F43F5E"
                     accentBg: "#2A1420"
@@ -166,11 +160,10 @@ Item {
                             color: "#1E1B4B"
                             border.width: 1
                             border.color: "#4338CA"
-                            Icon {
+                            Txt {
                                 anchors.centerIn: parent
-                                name: "sparkles"
-                                stroke: "#A5B4FC"
-                                implicitWidth: 18; implicitHeight: 18
+                                text: "✨"
+                                font.pixelSize: 16
                             }
                         }
 
@@ -190,8 +183,8 @@ Item {
                         SolidBtn {
                             height: 34
                             text: backend.isAiAnalyzing ? "AI 분석 중..." : "AI 진단 실행"
-                            glyph: "refresh"
-                            bg: "#6366F1"
+                            glyph: backend.isAiAnalyzing ? "clock" : "refresh"
+                            bg: backend.isAiAnalyzing ? "#475569" : "#6366F1"
                             enabled: !backend.isAiAnalyzing
                             onClicked: backend.requestAiUserAnalysis()
                         }
@@ -210,7 +203,7 @@ Item {
 
                         // 좌측: 유형 뱃지 & 아이콘
                         Rectangle {
-                            Layout.preferredWidth: 230
+                            Layout.preferredWidth: 240
                             Layout.fillHeight: true
                             Layout.minimumHeight: 140
                             radius: 12
@@ -219,33 +212,66 @@ Item {
                             border.color: "#242F46"
 
                             ColumnLayout {
-                                anchors.centerIn: parent
+                                anchors.fill: parent
+                                anchors.margins: 12
                                 spacing: 8
+
+                                // 중앙 엠블럼 원 (이모지 / 이모티콘)
                                 Rectangle {
                                     Layout.alignment: Qt.AlignHCenter
-                                    width: 44; height: 44; radius: 22
-                                    color: "#1C243B"
-                                    border.width: 1
+                                    width: 50; height: 50; radius: 25
+                                    color: "#182033"
+                                    border.width: 1.5
                                     border.color: backend.aiTypeColor
-                                    Icon {
+
+                                    Txt {
                                         anchors.centerIn: parent
-                                        name: backend.aiTypeIcon
-                                        stroke: backend.aiTypeColor
-                                        implicitWidth: 22; implicitHeight: 22
+                                        text: {
+                                            var str = (backend.aiUserType || "").trim()
+                                            if (str.indexOf("분석 대기") !== -1 || str.indexOf("안내") !== -1 || str.length === 0) {
+                                                return "💡"
+                                            }
+                                            // 1. 유니코드 서러게이트 페어 4바이트 이모지 (예: 👻, 🎧, 🚀, 🌱 등)
+                                            if (str.length >= 2) {
+                                                var c1 = str.charCodeAt(0)
+                                                var c2 = str.charCodeAt(1)
+                                                if (c1 >= 0xD800 && c1 <= 0xDBFF && c2 >= 0xDC00 && c2 <= 0xDFFF) {
+                                                    return str.substr(0, 2)
+                                                }
+                                            }
+                                            // 2. 단일 16비트 특수 기호 이모지 (예: ⚡ 0x26A1, ☕ 0x2615, ✨ 0x2728, ⚠️ 0x26A0 등)
+                                            var c = str.charCodeAt(0)
+                                            if ((c >= 0x2600 && c <= 0x27BF) || (c >= 0x2300 && c <= 0x23FF) || (c >= 0x2B00 && c <= 0x2BFF)) {
+                                                return str.substr(0, 1)
+                                            }
+                                            // 3. 한글이나 일반 텍스트인 경우 엠블럼 기본 이모지 반환
+                                            return "🎯"
+                                        }
+                                        font.pixelSize: 24
                                     }
                                 }
+
+                                // 페르소나 명칭 (박스 크기 내 자동 줄바꿈으로 텍스트 이탈 방지)
                                 Txt {
-                                    Layout.alignment: Qt.AlignHCenter
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 4
+                                    Layout.rightMargin: 4
                                     text: backend.aiUserType
-                                    font.pixelSize: 14
+                                    font.pixelSize: 13
                                     font.weight: Font.DemiBold
                                     color: backend.aiTypeColor
+                                    horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                    lineHeight: 1.2
                                 }
+
                                 Pill {
                                     Layout.alignment: Qt.AlignHCenter
-                                    text: "온디바이스 AI 판정"
+                                    text: backend.isAiAnalyzing ? "Gemini 분석 중..." : "Gemini AI 정밀 진단"
                                     fontSize: 10
-                                    fg: "#94A3B8"
+                                    fg: backend.isAiAnalyzing ? "#38BDF8" : "#94A3B8"
                                     color: "#1E293B"
                                 }
                             }
@@ -309,6 +335,82 @@ Item {
                                             wrapMode: Text.WordWrap
                                         }
                                     }
+                                }
+                            }
+
+                            // AI 추천 추가 차단 도메인 (원클릭 블랙리스트 등록)
+                            ColumnLayout {
+                                visible: backend.aiActionPlan.length > 0 || (backend.aiRecommendedDomains && backend.aiRecommendedDomains.length > 0)
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                RowLayout {
+                                    spacing: 6
+                                    Icon {
+                                        name: "alert"
+                                        stroke: "#FB7185"
+                                        implicitWidth: 14; implicitHeight: 14
+                                    }
+                                    Txt {
+                                        text: "AI 추천 추가 차단 도메인 (클릭 시 즉시 블랙리스트 등록)"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#FB7185"
+                                    }
+                                }
+
+                                Flow {
+                                    visible: backend.aiRecommendedDomains && backend.aiRecommendedDomains.length > 0
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Repeater {
+                                        model: backend.aiRecommendedDomains
+                                        delegate: Rectangle {
+                                            required property string modelData
+                                            height: 28
+                                            width: chipRow.implicitWidth + 20
+                                            radius: 7
+                                            color: chipHover.hovered ? "#4C1D24" : "#2A1420"
+                                            border.width: 1
+                                            border.color: chipHover.hovered ? "#F43F5E" : "#9F1239"
+
+                                            HoverHandler {
+                                                id: chipHover
+                                                cursorShape: Qt.PointingHandCursor
+                                            }
+
+                                            RowLayout {
+                                                id: chipRow
+                                                anchors.centerIn: parent
+                                                spacing: 6
+                                                Icon {
+                                                    name: "plus"
+                                                    stroke: "#FDA4AF"
+                                                    implicitWidth: 12; implicitHeight: 12
+                                                }
+                                                Txt {
+                                                    text: modelData
+                                                    font.pixelSize: 12
+                                                    font.weight: Font.Medium
+                                                    color: "#FDA4AF"
+                                                }
+                                            }
+
+                                            TapHandler {
+                                                onTapped: {
+                                                    backend.addToBlacklist(modelData)
+                                                    backend.showTrayNotification("블랙리스트 추가 완료", modelData + " 도메인이 차단 목록에 등록되었습니다.")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Txt {
+                                    visible: !backend.aiRecommendedDomains || backend.aiRecommendedDomains.length === 0
+                                    text: "✓ 모든 주요 연관 도메인이 이미 차단 목록에 안전하게 등록되어 있습니다."
+                                    font.pixelSize: 11
+                                    color: "#10B981"
                                 }
                             }
                         }
@@ -474,7 +576,7 @@ Item {
                         anchors.margins: 20
                         spacing: 0
 
-                        CardTitle { label: "가장 많이 낭비할 뻔한 도메인"; glyph: "ban"; glyphColor: "#F43F5E" }
+                        CardTitle { label: "최다 방어 도메인"; glyph: "shield-check"; glyphColor: "#F43F5E" }
 
                         Item { Layout.preferredHeight: 10 }
 
@@ -618,19 +720,23 @@ Item {
                               font.pixelSize: 14; font.weight: Font.DemiBold }
                         Item { Layout.fillWidth: true }
                         RowLayout {
-                            spacing: 7
-                            Txt { text: "적음"; font.pixelSize: 11; color: "#5F6879" }
+                            spacing: 8
+                            Rectangle {
+                                Layout.preferredWidth: 10; Layout.preferredHeight: 10
+                                radius: 2; color: "#131824"; border.width: 1; border.color: "#283348"
+                            }
+                            Txt { text: "수집 중 / 0분"; font.pixelSize: 11; color: "#5F6879" }
+                            Item { Layout.preferredWidth: 6 }
+                            Txt { text: "15분"; font.pixelSize: 11; color: "#5F6879" }
                             Repeater {
-                                model: 5
+                                model: [pgStats.heatColors[1], pgStats.heatColors[2], pgStats.heatColors[3], pgStats.heatColors[4]]
                                 delegate: Rectangle {
-                                    required property int index
-                                    Layout.preferredWidth: 13
-                                    Layout.preferredHeight: 13
-                                    radius: 3
-                                    color: pgStats.heatColors[index]
+                                    required property var modelData
+                                    Layout.preferredWidth: 11; Layout.preferredHeight: 11
+                                    radius: 2; color: modelData
                                 }
                             }
-                            Txt { text: "많음"; font.pixelSize: 11; color: "#5F6879" }
+                            Txt { text: "60분"; font.pixelSize: 11; color: "#5F6879" }
                         }
                     }
 
@@ -647,34 +753,84 @@ Item {
                                 id: heatRow
                                 required property int index
                                 property int dayIdx: index
+                                property bool isToday: {
+                                    var d = new Date().getDay()
+                                    return dayIdx === (d === 0 ? 6 : d - 1)
+                                }
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 spacing: 5
 
                                 Txt {
-                                    Layout.preferredWidth: 22
-                                    text: root.weekLabels[index]
+                                    Layout.preferredWidth: 26
+                                    text: heatRow.isToday ? (root.weekLabels[index] + "•") : root.weekLabels[index]
                                     font.pixelSize: 11
-                                    color: index >= 5 ? "#6E6A92" : "#7C8699"
+                                    font.weight: heatRow.isToday ? Font.DemiBold : Font.Normal
+                                    color: heatRow.isToday ? "#A5B4FC" : (index >= 5 ? "#5E5A82" : "#6C7689")
                                 }
 
                                 Repeater {
                                     model: 24
                                     delegate: Rectangle {
+                                        id: heatTile
                                         required property int index
-                                        property int lv: root.heatValue(heatRow.dayIdx, index)
+                                        property int hourIdx: index
+                                        property int lv: root.heatValue(heatRow.dayIdx, hourIdx)
+                                        property bool isCurrentHour: heatRow.isToday && (new Date().getHours() === hourIdx)
+                                        property bool isFutureHour: heatRow.isToday && (new Date().getHours() < hourIdx)
+                                        property bool isPastDay: {
+                                            var d = new Date().getDay()
+                                            var today = (d === 0 ? 6 : d - 1)
+                                            return heatRow.dayIdx < today
+                                        }
+                                        property bool isFutureDay: {
+                                            var d = new Date().getDay()
+                                            var today = (d === 0 ? 6 : d - 1)
+                                            return heatRow.dayIdx > today
+                                        }
+
                                         Layout.fillWidth: true
                                         Layout.fillHeight: true
                                         radius: 4
-                                        color: pgStats.heatColors[lv]
-                                        border.width: tileHover.hovered ? 1 : 0
-                                        border.color: "#A5B4FC"
+
+                                        // 색상 톤 정리
+                                        color: {
+                                            if (lv > 0) return pgStats.heatColors[lv]
+                                            if (isCurrentHour) return "#1F2842"
+                                            if (heatRow.isToday) return "#151C2C"
+                                            if (isPastDay) return "#131824"
+                                            return "#0F141F" // 미래 요일
+                                        }
+
+                                        // 현재 시간대 및 호버 테두리
+                                        border.width: tileHover.hovered ? 1 : (isCurrentHour ? 1.5 : (heatRow.isToday ? 0.5 : 0))
+                                        border.color: tileHover.hovered ? "#A5B4FC" : (isCurrentHour ? "#818CF8" : (heatRow.isToday ? "#212B40" : "transparent"))
+
                                         HoverHandler { id: tileHover }
                                         ToolTip.visible: tileHover.hovered
-                                        ToolTip.delay: 300
-                                        ToolTip.text: root.weekLabels[heatRow.dayIdx] + "요일 "
-                                                      + (index < 10 ? "0" + index : index) + "시 · "
-                                                      + (lv * 15) + "분 집중"
+                                        ToolTip.delay: 200
+                                        ToolTip.text: {
+                                            var dayName = root.weekLabels[heatRow.dayIdx] + "요일"
+                                            var timeStr = (hourIdx < 10 ? "0" + hourIdx : hourIdx) + ":00"
+
+                                            if (lv > 0) {
+                                                return dayName + " " + timeStr + " · " + (lv * 15) + "분 집중 완료"
+                                            }
+                                            if (isCurrentHour) {
+                                                return dayName + " " + timeStr + " · [현재 시간대] 실시간 측정 중"
+                                            }
+                                            if (heatRow.isToday) {
+                                                if (isFutureHour) {
+                                                    return dayName + " " + timeStr + " · 예정 (데이터 수집 대기)"
+                                                } else {
+                                                    return dayName + " " + timeStr + " · 집중 기록 없음"
+                                                }
+                                            }
+                                            if (isFutureDay) {
+                                                return dayName + " " + timeStr + " · 예정 (데이터 수집 대기)"
+                                            }
+                                            return dayName + " " + timeStr + " · 데이터 수집 중 (기록 없음)"
+                                        }
                                     }
                                 }
                             }

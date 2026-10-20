@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
+#include <memory>
 #include "BackendManager.h"
 
 void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
@@ -71,12 +72,12 @@ int main(int argc, char *argv[])
 
     // BackendManager: JSON 폴링 + pause.flag 제어
     qDebug() << "[Main] Constructing BackendManager...";
-    BackendManager backendManager;
+    auto backendManager = std::make_unique<BackendManager>();
     qDebug() << "[Main] BackendManager constructed successfully";
 
     QQmlApplicationEngine engine;
     // QML 전역에 'backend' 이름으로 노출
-    engine.rootContext()->setContextProperty("backend", &backendManager);
+    engine.rootContext()->setContextProperty("backend", backendManager.get());
 
     // URI "FocusNet.Guardian" → Main.qml
     const QUrl url(u"qrc:/FocusNet/Guardian/Main.qml"_qs);
@@ -114,7 +115,7 @@ int main(int argc, char *argv[])
 
     QObject::connect(actOpen, &QAction::triggered, showWindow);
     QObject::connect(actPause, &QAction::triggered, [&backendManager]() {
-        backendManager.togglePause();
+        backendManager->togglePause();
     });
     QObject::connect(actQuit, &QAction::triggered, &app, &QApplication::quit);
 
@@ -124,8 +125,8 @@ int main(int argc, char *argv[])
         }
     });
 
-    QObject::connect(&backendManager, &BackendManager::showWindowRequested, showWindow);
-    QObject::connect(&backendManager, &BackendManager::trayNotificationRequested,
+    QObject::connect(backendManager.get(), &BackendManager::showWindowRequested, showWindow);
+    QObject::connect(backendManager.get(), &BackendManager::trayNotificationRequested,
         [&trayIcon](const QString &title, const QString &message) {
             trayIcon.showMessage(title, message, QSystemTrayIcon::Information, 3500);
         });

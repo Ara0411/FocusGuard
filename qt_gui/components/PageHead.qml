@@ -33,51 +33,6 @@ RowLayout {
             id: phActions
             Layout.alignment: Qt.AlignVCenter
             spacing: 10
-        },
-
-        Rectangle {
-            visible: phActions.children.length > 0
-            Layout.preferredWidth: 1
-            Layout.preferredHeight: 26
-            Layout.leftMargin: 6
-            Layout.rightMargin: 2
-            color: "#232C3C"
-        },
-
-        // 알림 (벨)
-        Rectangle {
-            Layout.preferredWidth: 42; Layout.preferredHeight: 42
-            radius: 21
-            color: bellHover.hovered ? "#1A2130" : "#151B26"
-            border.width: 1; border.color: "#212A38"
-            HoverHandler { id: bellHover; cursorShape: Qt.PointingHandCursor }
-            Icon { anchors.centerIn: parent; name: "bell"; stroke: "#9BA6BC"
-                   implicitWidth: 19; implicitHeight: 19 }
-        },
-
-        // 다크모드
-        Rectangle {
-            Layout.preferredWidth: 42; Layout.preferredHeight: 42
-            radius: 21
-            color: moonHover.hovered ? "#1A2130" : "#151B26"
-            border.width: 1; border.color: "#212A38"
-            HoverHandler { id: moonHover; cursorShape: Qt.PointingHandCursor }
-            Icon { anchors.centerIn: parent; name: "moon"; stroke: "#9BA6BC"
-                   implicitWidth: 19; implicitHeight: 19 }
-        },
-
-        // 프로필
-        Rectangle {
-            Layout.preferredWidth: 42; Layout.preferredHeight: 42
-            radius: 21
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#2A3348" }
-                GradientStop { position: 1.0; color: "#222A3C" }
-            }
-            border.width: 1; border.color: "#333D55"
-            HoverHandler { cursorShape: Qt.PointingHandCursor }
-            Txt { anchors.centerIn: parent; text: ph.avatar
-                  font.pixelSize: 15; font.weight: Font.DemiBold; color: "#D4DBEA" }
         }
     ]
 }

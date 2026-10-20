@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 Network)
 
 # nlohmann_json (FetchContent)
 include(FetchContent)
@@ -66,7 +66,7 @@ qt_add_qml_module(FocusNetGuardian
 )
 
 target_link_libraries(FocusNetGuardian
-    PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2 nlohmann_json::nlohmann_json
+    PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network nlohmann_json::nlohmann_json
 )
 
 set_target_properties(FocusNetGuardian PROPERTIES

@@ -5,6 +5,12 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 
 class BackendManager : public QObject
 {
@@ -15,6 +21,7 @@ class BackendManager : public QObject
     Q_PROPERTY(int      elapsedSecs       READ elapsedSecs       NOTIFY elapsedSecsChanged)
     Q_PROPERTY(QString  focusTime         READ focusTime         NOTIFY focusTimeChanged)
     Q_PROPERTY(int      blockedAttempts   READ blockedAttempts   NOTIFY blockedAttemptsChanged)
+    Q_PROPERTY(int      blockedSessions   READ blockedSessions   NOTIFY blockedSessionsChanged)
     Q_PROPERTY(int      blockedSecs       READ blockedSecs       NOTIFY blockedSecsChanged)
     Q_PROPERTY(QString  blockedTime       READ blockedTime       NOTIFY blockedTimeChanged)
     Q_PROPERTY(int      bestRecord        READ bestRecord        NOTIFY bestRecordChanged)
@@ -38,18 +45,27 @@ class BackendManager : public QObject
     Q_PROPERTY(int     rstRetry      READ rstRetry      WRITE setRstRetry      NOTIFY rstRetryChanged)
     Q_PROPERTY(int     pomodoroFocus READ pomodoroFocus WRITE setPomodoroFocus NOTIFY pomodoroFocusChanged)
     Q_PROPERTY(int     pomodoroRest  READ pomodoroRest  WRITE setPomodoroRest  NOTIFY pomodoroRestChanged)
+    Q_PROPERTY(bool    isPomodoroBreak READ isPomodoroBreak NOTIFY pomodoroStateChanged)
+    Q_PROPERTY(int     pomodoroRemainingSecs READ pomodoroRemainingSecs NOTIFY pomodoroStateChanged)
+    Q_PROPERTY(int     pomodoroRound READ pomodoroRound NOTIFY pomodoroRoundChanged)
+    Q_PROPERTY(bool    pomodoroAutoEnabled READ pomodoroAutoEnabled WRITE setPomodoroAutoEnabled NOTIFY pomodoroAutoEnabledChanged)
     Q_PROPERTY(bool    toastEnabled  READ toastEnabled  WRITE setToastEnabled  NOTIFY toastEnabledChanged)
     Q_PROPERTY(bool    autoStart     READ autoStart     WRITE setAutoStart     NOTIFY autoStartChanged)
     Q_PROPERTY(bool    trayOnClose   READ trayOnClose   WRITE setTrayOnClose   NOTIFY trayOnCloseChanged)
     Q_PROPERTY(QString settingsFilePath READ settingsFilePath CONSTANT)
 
-    // ── AI 통계 분석 (사용자 인터넷 사용 유형) ─────────────────
-    Q_PROPERTY(bool        isAiAnalyzing    READ isAiAnalyzing    NOTIFY isAiAnalyzingChanged)
-    Q_PROPERTY(QString     aiUserType       READ aiUserType       NOTIFY aiAnalysisFinished)
-    Q_PROPERTY(QString     aiTypeIcon       READ aiTypeIcon       NOTIFY aiAnalysisFinished)
-    Q_PROPERTY(QString     aiTypeColor      READ aiTypeColor      NOTIFY aiAnalysisFinished)
-    Q_PROPERTY(QString     aiAnalysisReport READ aiAnalysisReport NOTIFY aiAnalysisFinished)
-    Q_PROPERTY(QStringList aiActionPlan     READ aiActionPlan     NOTIFY aiAnalysisFinished)
+    // ── AI 통계 분석 (사용자 인터넷 사용 유형 및 Gemini 연동) ─────
+    Q_PROPERTY(bool        isAiAnalyzing       READ isAiAnalyzing       NOTIFY isAiAnalyzingChanged)
+    Q_PROPERTY(QString     aiUserType          READ aiUserType          NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QString     aiTypeIcon          READ aiTypeIcon          NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QString     aiTypeColor         READ aiTypeColor         NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QString     aiAnalysisReport    READ aiAnalysisReport    NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QStringList aiActionPlan        READ aiActionPlan        NOTIFY aiAnalysisFinished)
+    Q_PROPERTY(QStringList aiRecommendedDomains READ aiRecommendedDomains NOTIFY aiRecommendedDomainsChanged)
+    Q_PROPERTY(int         aiCooldownSecs      READ aiCooldownSecs      NOTIFY aiCooldownSecsChanged)
+    Q_PROPERTY(bool        isAiInCooldown      READ isAiInCooldown      NOTIFY aiCooldownSecsChanged)
+    Q_PROPERTY(QString     geminiApiKey        READ geminiApiKey        WRITE setGeminiApiKey NOTIFY geminiApiKeyChanged)
+    Q_PROPERTY(QString     maskedGeminiApiKey  READ maskedGeminiApiKey  NOTIFY geminiApiKeyChanged)
 
     // ── Npcap 엔진 프로세스 및 콘솔 로그 제어 ─────────────────
     Q_PROPERTY(bool        isEngineRunning  READ isEngineRunning  NOTIFY isEngineRunningChanged)
@@ -69,6 +85,7 @@ public:
     int         elapsedSecs()      const { return m_elapsedSecs; }
     QString     focusTime()        const { return m_focusTime; }
     int         blockedAttempts()  const { return m_blockedAttempts; }
+    int         blockedSessions()  const { return m_blockedSessions; }
     int         blockedSecs()      const { return m_blockedSecs; }
     QString     blockedTime()      const { return m_blockedTime; }
     QVariantList timelineData()     const { return m_timelineData; }
@@ -89,17 +106,26 @@ public:
     int         rstRetry()         const { return m_rstRetry; }
     int         pomodoroFocus()    const { return m_pomodoroFocus; }
     int         pomodoroRest()     const { return m_pomodoroRest; }
+    bool        isPomodoroBreak()  const { return m_isPomodoroBreak; }
+    int         pomodoroRemainingSecs() const;
+    int         pomodoroRound()    const { return m_pomodoroRound; }
+    bool        pomodoroAutoEnabled() const { return m_pomodoroAutoEnabled; }
     bool        toastEnabled()     const { return m_toastEnabled; }
     bool        autoStart()        const { return m_autoStart; }
     bool        trayOnClose()      const { return m_trayOnClose; }
 
     // AI Getters
-    bool        isAiAnalyzing()    const { return m_isAiAnalyzing; }
-    QString     aiUserType()       const { return m_aiUserType; }
-    QString     aiTypeIcon()       const { return m_aiTypeIcon; }
-    QString     aiTypeColor()      const { return m_aiTypeColor; }
-    QString     aiAnalysisReport() const { return m_aiAnalysisReport; }
-    QStringList aiActionPlan()     const { return m_aiActionPlan; }
+    bool        isAiAnalyzing()        const { return m_isAiAnalyzing; }
+    QString     aiUserType()           const { return m_aiUserType; }
+    QString     aiTypeIcon()           const { return m_aiTypeIcon; }
+    QString     aiTypeColor()          const { return m_aiTypeColor; }
+    QString     aiAnalysisReport()     const { return m_aiAnalysisReport; }
+    QStringList aiActionPlan()         const { return m_aiActionPlan; }
+    QStringList aiRecommendedDomains() const { return m_aiRecommendedDomains; }
+    int         aiCooldownSecs()       const { return m_aiCooldownSecs; }
+    bool        isAiInCooldown()       const { return m_aiCooldownSecs > 0; }
+    QString     geminiApiKey()         const { return m_geminiApiKey; }
+    QString     maskedGeminiApiKey()   const;
 
     // Engine & NIC Getters
     bool        isEngineRunning()  const { return m_isEngineRunning; }
@@ -116,17 +142,20 @@ public:
     void setRstRetry(int v);
     void setPomodoroFocus(int v);
     void setPomodoroRest(int v);
+    void setPomodoroAutoEnabled(bool v);
     void setToastEnabled(bool v);
     void setAutoStart(bool v);
     void setTrayOnClose(bool v);
     void setNicIndex(int v);
     void setTargetAdapter(const QString &v);
+    void setGeminiApiKey(const QString &v);
 
 public slots:
     void reloadStats();
     void loadSettings();
     void saveSettings();
     void togglePause();
+    void resetPomodoro();
 
     // 엔진 라이프사이클 및 로그 제어 (QML 호출용)
     Q_INVOKABLE void startEngine();
@@ -138,8 +167,14 @@ public slots:
     Q_INVOKABLE void refreshNetworkAdapters();
     Q_INVOKABLE void selectNetworkAdapter(int index);
 
-    // AI 인터넷 사용 유형 분석 요청 (QML 호출)
+    // AI 인터넷 사용 유형 분석 요청 및 1~2단계 요약기/프롬프트 빌더 (QML 연동)
     Q_INVOKABLE void requestAiUserAnalysis();
+    Q_INVOKABLE bool canRequestAiAnalysis() const;
+    Q_INVOKABLE QString getAiAnalysisBlockReason() const;
+    Q_INVOKABLE QString getAiPayloadDigestJson() const;
+    Q_INVOKABLE QString getGeminiRequestBodyJson() const;
+    QJsonObject generateAiPayloadDigest() const;
+    QJsonObject buildGeminiRequestBody(const QJsonObject &digest) const;
 
     // 일괄 설정 저장 (QML 호출용)
     Q_INVOKABLE void saveAppSettings(int blockMode, int rstRetry, int pomodoroFocus, int pomodoroRest, bool toastEnabled, bool autoStart, bool trayOnClose, const QString &userName, const QString &targetTime);
@@ -187,6 +222,9 @@ signals:
     void rstRetryChanged();
     void pomodoroFocusChanged();
     void pomodoroRestChanged();
+    void pomodoroStateChanged();
+    void pomodoroRoundChanged();
+    void pomodoroAutoEnabledChanged();
     void toastEnabledChanged();
     void autoStartChanged();
     void trayOnCloseChanged();
@@ -198,6 +236,10 @@ signals:
     void nicIndexChanged();
     void targetAdapterChanged();
     void trayNotificationRequested(const QString &title, const QString &message);
+    void geminiApiKeyChanged();
+    void blockedSessionsChanged();
+    void aiCooldownSecsChanged();
+    void aiRecommendedDomainsChanged();
 
 private:
     // 파일 경로 (생성자에서 자동 탐색)
@@ -218,22 +260,29 @@ private:
     int         m_nicIndex          = 0;
     QString     m_targetAdapter     = "AUTO";
 
-    // AI 인터넷 사용 유형 결과 캐시
+    // AI 인터넷 사용 유형 결과 캐시 및 Gemini API
+    QString     m_geminiApiKey;
     bool        m_isAiAnalyzing    = false;
     QString     m_aiUserType       = "분석 대기 중";
     QString     m_aiTypeIcon       = "sparkles";
     QString     m_aiTypeColor      = "#818CF8";
     QString     m_aiAnalysisReport = "집중 세션 동안 축적된 네트워크 패킷 및 차단 로그를 AI가 분석하여 사용자의 인터넷 몰입 유형과 개선 가이드를 도출합니다.";
     QStringList m_aiActionPlan;
+    QStringList m_aiRecommendedDomains;
+    int         m_aiCooldownSecs   = 0;
+    QTimer     *m_cooldownTimer    = nullptr;
 
-    // 폴링 타이머
+    // 폴링 타이머 및 네트워크 매니저
     QTimer *m_timer = nullptr;
+    QNetworkAccessManager *m_netManager = nullptr;
 
     // 데이터
     double       m_focusScore      = 0.0;
     int          m_elapsedSecs     = 0;
     QString      m_focusTime       = "00:00:00";
     int          m_blockedAttempts = 0;
+    int          m_blockedSessions = 0;
+    time_t       m_lastBlockTimestamp = 0;
     int          m_blockedSecs     = 0;
     QString      m_blockedTime     = "00:00:00";
     int          m_bestRecord      = 0;
@@ -246,11 +295,17 @@ private:
     int          m_rstRetry        = 3;
     int          m_pomodoroFocus   = 25;
     int          m_pomodoroRest    = 5;
+    bool         m_isPomodoroBreak = false;
+    int          m_pomodoroElapsedSecs = 0;
+    int          m_pomodoroRound   = 0;
+    bool         m_pomodoroAutoEnabled = true;
     bool         m_toastEnabled    = true;
     bool         m_autoStart       = true;
     bool         m_trayOnClose     = true;
     time_t       m_startTime       = 0;
     time_t       m_firstBlockTime  = 0;
+    time_t       m_pauseStartTime  = 0;
+    int          m_totalPausedSecs = 0;
 
     QVariantList m_timelineData;
     QVariantList m_recentLogs;

@@ -415,7 +415,7 @@ ApplicationWindow {
                             ListElement { label: "사이트 관리"; glyph: "globe" }
                             ListElement { label: "집중 통계";   glyph: "bars" }
                             ListElement { label: "설정";       glyph: "gear" }
-                            ListElement { label: "엔진 콘솔";   glyph: "cpu" }
+                            ListElement { label: "엔진 콘솔";   glyph: "terminal" }
                         }
                         delegate: Rectangle {
                             id: navItem
@@ -425,32 +425,37 @@ ApplicationWindow {
                             property bool active: index === root.currentPage
 
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 48
-                            radius: 12
-                            color: active ? "#1D2439" : (navHover.hovered ? "#161C2A" : "transparent")
-                            border.width: active ? 1 : 0
-                            border.color: "#2B3350"
+                            Layout.preferredHeight: 46
+                            radius: 10
+                            color: active ? "#1E2640" : (navHover.hovered ? "#161D2B" : "transparent")
+                            border.width: 1
+                            border.color: active ? "#4F46E5" : (navHover.hovered ? "#263045" : "transparent")
                             Behavior on color { ColorAnimation { duration: 130 } }
+                            Behavior on border.color { ColorAnimation { duration: 130 } }
 
                             HoverHandler { id: navHover; cursorShape: Qt.PointingHandCursor }
                             TapHandler { onTapped: root.goPage(navItem.index) }
 
-                            Rectangle {   // 활성 인디케이터
-                                width: 3; height: 20; radius: 2
+                            Rectangle {   // 활성 인디케이터 (좌측 세로 강조 바)
+                                width: 3.5
+                                height: 22
+                                radius: 2
                                 anchors.verticalCenter: parent.verticalCenter
-                                x: -20
-                                color: "#7B61FF"
-                                opacity: navItem.active ? 1 : 0
+                                anchors.left: parent.left
+                                anchors.leftMargin: 0
+                                color: "#818CF8"
+                                opacity: navItem.active ? 1.0 : 0.0
                                 Behavior on opacity { NumberAnimation { duration: 160 } }
                             }
 
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 14
+                                anchors.rightMargin: 12
                                 spacing: 13
                                 Icon {
                                     name: navItem.glyph
-                                    stroke: navItem.active ? "#A9B6FF" : "#6E7A92"
+                                    stroke: navItem.active ? "#C7D2FE" : (navHover.hovered ? "#A5B4FC" : "#6E7A92")
                                     implicitWidth: 19; implicitHeight: 19
                                 }
                                 Txt {
@@ -458,7 +463,7 @@ ApplicationWindow {
                                     text: navItem.label
                                     font.pixelSize: 14
                                     font.weight: navItem.active ? Font.DemiBold : Font.Normal
-                                    color: navItem.active ? "#EDF0FA" : "#8A94A8"
+                                    color: navItem.active ? "#FFFFFF" : (navHover.hovered ? "#E2E8F0" : "#8A94A8")
                                 }
                             }
                         }
@@ -485,8 +490,8 @@ ApplicationWindow {
                             ColumnLayout {
                                 spacing: 2
                                 Txt { text: "집중 모드"; font.pixelSize: 13; font.weight: Font.DemiBold }
-                                Txt { text: root.isFocusing ? "진행 중" : "정지됨"
-                                      font.pixelSize: 11; color: "#7F8AA0" }
+                                Txt { text: root.isFocusing ? "집중 진행 중" : "휴식 중 (일시정지)"
+                                      font.pixelSize: 11; color: root.isFocusing ? "#7F8AA0" : "#FBBF24" }
                             }
                         }
 
@@ -496,9 +501,9 @@ ApplicationWindow {
                             Layout.alignment: Qt.AlignHCenter
                             spacing: 8
                             Rectangle {
-                                width: 7; height: 7; radius: 3.5; color: "#7B61FF"
+                                width: 7; height: 7; radius: 3.5; color: root.isFocusing ? "#7B61FF" : "#F59E0B"
                                 SequentialAnimation on opacity {
-                                    running: root.isFocusing; loops: Animation.Infinite
+                                    running: true; loops: Animation.Infinite
                                     NumberAnimation { to: 0.25; duration: 900; easing.type: Easing.InOutQuad }
                                     NumberAnimation { to: 1.0;  duration: 900; easing.type: Easing.InOutQuad }
                                 }
@@ -515,8 +520,8 @@ ApplicationWindow {
                         GhostBtn {
                             Layout.fillWidth: true
                             height: 38
-                            text: root.isFocusing ? "중지하기" : "다시 시작"
-                            glyph: root.isFocusing ? "stop" : "play"
+                            text: root.isFocusing ? "휴식하기" : "집중 시작"
+                            glyph: root.isFocusing ? "coffee" : "play"
                             onClicked: backend.togglePause()
                         }
                     }
