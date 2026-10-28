@@ -61,6 +61,8 @@ Item {
                         root.toastEnabled = true
                         root.autoStart = true
                         root.trayOnClose = true
+                        root.toggleShortcut = "Ctrl+Shift+U"
+                        root.toggleShortcutEnabled = true
                     }
                 }
                 SolidBtn {
@@ -78,7 +80,9 @@ Item {
                             root.autoStart,
                             root.trayOnClose,
                             nameInput.text,
-                            pgSet.targetTimeValue
+                            pgSet.targetTimeValue,
+                            root.toggleShortcut,
+                            root.toggleShortcutEnabled
                         )
                         saveToast.show("설정이 성공적으로 저장되었습니다")
                     }
@@ -374,6 +378,173 @@ Item {
                                             lineHeight: 1.3
                                             color: "#6A7488"
                                             wrapMode: Text.WordWrap
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── 1-1. 차단 모드 전환 단축키 (Quick Hotkey) ──
+                        Item { Layout.preferredHeight: 8 }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: hotkeyInnerCol.implicitHeight + 20
+                            radius: 9
+                            color: "#0F1522"
+                            border.width: 1
+                            border.color: "#1E2738"
+
+                            ColumnLayout {
+                                id: hotkeyInnerCol
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 10
+                                spacing: 8
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Icon { name: "terminal"; stroke: "#A5B4FC"; implicitWidth: 15; implicitHeight: 15 }
+                                    Txt {
+                                        text: "단축키 빠른 전환 (Quick Hotkey)"
+                                        font.pixelSize: 11; font.weight: Font.Bold; color: "#E2E8F0"
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Toggle {
+                                        checked: root.toggleShortcutEnabled
+                                        onToggled: function(v) { root.toggleShortcutEnabled = v }
+                                    }
+                                }
+
+                                Txt {
+                                    Layout.fillWidth: true
+                                    text: "작업 중 어디서나 단축키로 엄격 ↔ 유연 모드를 즉시 토글합니다 (콘솔 'U'키와 동기화)."
+                                    font.pixelSize: 10; color: "#6A7488"; wrapMode: Text.WordWrap; lineHeight: 1.25
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    visible: root.toggleShortcutEnabled
+
+                                    // 단축키 캡처/표시 박스
+                                    Rectangle {
+                                        id: keyBox
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 30
+                                        radius: 6
+                                        color: isRecording ? "#2A1E3D" : "#161E2E"
+                                        border.width: 1
+                                        border.color: isRecording ? "#A78BFA" : "#2E3B50"
+
+                                        property bool isRecording: false
+
+                                        focus: isRecording
+                                        Keys.onPressed: function(event) {
+                                            if (!isRecording) return;
+                                            event.accepted = true;
+
+                                            if (event.key === Qt.Key_Escape) {
+                                                isRecording = false;
+                                                return;
+                                            }
+
+                                            var parts = [];
+                                            if (event.modifiers & Qt.ControlModifier) parts.push("Ctrl");
+                                            if (event.modifiers & Qt.AltModifier) parts.push("Alt");
+                                            if (event.modifiers & Qt.ShiftModifier) parts.push("Shift");
+                                            if (event.modifiers & Qt.MetaModifier) parts.push("Win");
+
+                                            var k = event.key;
+                                            var keyName = "";
+                                            if (k >= Qt.Key_F1 && k <= Qt.Key_F24) {
+                                                keyName = "F" + (k - Qt.Key_F1 + 1);
+                                            } else if (k >= Qt.Key_A && k <= Qt.Key_Z) {
+                                                keyName = String.fromCharCode(k);
+                                            } else if (k >= Qt.Key_0 && k <= Qt.Key_9) {
+                                                keyName = String.fromCharCode(k);
+                                            } else if (k === Qt.Key_Space) {
+                                                keyName = "Space";
+                                            } else if (k === Qt.Key_Tab) {
+                                                keyName = "Tab";
+                                            }
+
+                                            if (keyName.length > 0) {
+                                                parts.push(keyName);
+                                                var fullSeq = parts.join("+");
+                                                if (parts.length > 1 || keyName.startsWith("F")) {
+                                                    root.toggleShortcut = fullSeq;
+                                                    isRecording = false;
+                                                }
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 4
+                                            Txt {
+                                                text: keyBox.isRecording ? "조합 키를 누르세요..." : (root.toggleShortcut || "Ctrl+Shift+U")
+                                                font.pixelSize: 11
+                                                font.family: "Consolas"
+                                                font.weight: Font.DemiBold
+                                                color: keyBox.isRecording ? "#C4B5FD" : "#818CF8"
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                keyBox.isRecording = true;
+                                                keyBox.forceActiveFocus();
+                                            }
+                                        }
+                                    }
+
+                                    // 변경 버튼
+                                    Rectangle {
+                                        Layout.preferredWidth: 48
+                                        Layout.preferredHeight: 30
+                                        radius: 6
+                                        color: "#1E273A"
+                                        border.width: 1
+                                        border.color: "#303E58"
+                                        Txt {
+                                            anchors.centerIn: parent
+                                            text: keyBox.isRecording ? "취소" : "변경"
+                                            font.pixelSize: 11; color: "#A5B4FC"
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                keyBox.isRecording = !keyBox.isRecording;
+                                                if (keyBox.isRecording) keyBox.forceActiveFocus();
+                                            }
+                                        }
+                                    }
+
+                                    // 기본값 복원 버튼
+                                    Rectangle {
+                                        Layout.preferredWidth: 48
+                                        Layout.preferredHeight: 30
+                                        radius: 6
+                                        color: "transparent"
+                                        border.width: 1
+                                        border.color: "#283348"
+                                        Txt {
+                                            anchors.centerIn: parent
+                                            text: "초기화"
+                                            font.pixelSize: 10; color: "#6A7488"
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                keyBox.isRecording = false;
+                                                root.toggleShortcut = "Ctrl+Shift+U";
+                                            }
                                         }
                                     }
                                 }

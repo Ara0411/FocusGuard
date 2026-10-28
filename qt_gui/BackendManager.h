@@ -99,6 +99,10 @@ class BackendManager : public QObject
     Q_PROPERTY(int totalAccumulatedSessions READ totalAccumulatedSessions NOTIFY historyDataChanged)
     Q_PROPERTY(int totalAccumulatedRounds READ totalAccumulatedRounds NOTIFY historyDataChanged)
 
+    // ── 차단 모드 토글 단축키 (전역 핫키) ─────────────────
+    Q_PROPERTY(QString toggleShortcut READ toggleShortcut WRITE setToggleShortcut NOTIFY toggleShortcutChanged)
+    Q_PROPERTY(bool toggleShortcutEnabled READ toggleShortcutEnabled WRITE setToggleShortcutEnabled NOTIFY toggleShortcutEnabledChanged)
+
 public:
     explicit BackendManager(QObject *parent = nullptr);
     virtual ~BackendManager();
@@ -162,6 +166,12 @@ public:
     int         totalAccumulatedSessions() const;
     int         totalAccumulatedRounds()   const;
 
+    // Hotkey Getters & Setters
+    QString     toggleShortcut()        const { return m_toggleShortcut; }
+    void        setToggleShortcut(const QString &v);
+    bool        toggleShortcutEnabled() const { return m_toggleShortcutEnabled; }
+    void        setToggleShortcutEnabled(bool v);
+
     // Setters
     void setIsPaused(bool v);
     void setUserName(const QString &v);
@@ -205,7 +215,9 @@ public slots:
     QJsonObject buildGeminiRequestBody(const QJsonObject &digest) const;
 
     // 일괄 설정 저장 (QML 호출용)
-    Q_INVOKABLE void saveAppSettings(int blockMode, int rstRetry, int pomodoroFocus, int pomodoroRest, bool toastEnabled, bool autoStart, bool trayOnClose, const QString &userName, const QString &targetTime);
+    Q_INVOKABLE void saveAppSettings(int blockMode, int rstRetry, int pomodoroFocus, int pomodoroRest, bool toastEnabled, bool autoStart, bool trayOnClose, const QString &userName, const QString &targetTime, const QString &toggleShortcut = "", bool toggleShortcutEnabled = true);
+    Q_INVOKABLE void toggleBlockMode();
+    Q_INVOKABLE bool testRegisterShortcut(const QString &keySequence);
 
     // 화이트리스트 / 블랙리스트 CRUD (SitesPage 연동용)
     Q_INVOKABLE void addToWhitelist(const QString &domain);
@@ -280,6 +292,8 @@ signals:
     void blockedSessionsChanged();
     void aiCooldownSecsChanged();
     void aiRecommendedDomainsChanged();
+    void toggleShortcutChanged();
+    void toggleShortcutEnabledChanged();
 
 private:
     // 파일 경로 (생성자에서 자동 탐색)
@@ -343,6 +357,13 @@ private:
     bool         m_toastEnabled    = true;
     bool         m_autoStart       = true;
     bool         m_trayOnClose     = true;
+    QString      m_toggleShortcut  = "Ctrl+Shift+U";
+    bool         m_toggleShortcutEnabled = true;
+    void         registerGlobalHotkey();
+    void         unregisterGlobalHotkey();
+#ifdef _WIN32
+    class HotkeyEventFilter *m_hotkeyFilter = nullptr;
+#endif
     time_t       m_startTime       = 0;
     time_t       m_firstBlockTime  = 0;
     time_t       m_pauseStartTime  = 0;

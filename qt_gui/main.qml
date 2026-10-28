@@ -226,6 +226,12 @@ ApplicationWindow {
         function onBlockedProcessesChanged() {
             root.updateBlockedProcesses()
         }
+        function onToggleShortcutChanged() {
+            root.toggleShortcut = backend.toggleShortcut
+        }
+        function onToggleShortcutEnabledChanged() {
+            root.toggleShortcutEnabled = backend.toggleShortcutEnabled
+        }
     }
 
     Component.onCompleted: {
@@ -241,6 +247,8 @@ ApplicationWindow {
         root.autoStart = backend.autoStart
         root.trayOnClose = backend.trayOnClose
         root.weekMinutes = backend.weeklyMinutes
+        root.toggleShortcut = backend.toggleShortcut
+        root.toggleShortcutEnabled = backend.toggleShortcutEnabled
     }
 
     // ---- 사이트 및 앱 정책 -------------------------------------------
@@ -273,7 +281,18 @@ ApplicationWindow {
     property bool   toastEnabled:  backend.toastEnabled
     property bool   autoStart:     backend.autoStart
     property bool   trayOnClose:   backend.trayOnClose
+    property string toggleShortcut: backend.toggleShortcut
+    property bool   toggleShortcutEnabled: backend.toggleShortcutEnabled
     property string backupPath:    backend.settingsFilePath
+
+    // 차단 모드 토글 로컬 단축키 (창 활성화 시)
+    Shortcut {
+        sequence: root.toggleShortcut
+        enabled: root.toggleShortcutEnabled && root.toggleShortcut.length > 0
+        onActivated: {
+            backend.toggleBlockMode()
+        }
+    }
 
     // =================================================================
     //  유틸

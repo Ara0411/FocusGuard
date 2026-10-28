@@ -9,6 +9,7 @@
 #include <QSystemTrayIcon>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QAbstractNativeEventFilter>
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <ctime>
@@ -16,6 +17,29 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+
+#define HOTKEY_TOGGLE_MODE_ID 0xBEEF
+
+class HotkeyEventFilter : public QAbstractNativeEventFilter
+{
+public:
+    HotkeyEventFilter(BackendManager *mgr) : m_mgr(mgr) {}
+    bool nativeEventFilter(const QByteArray &eventType, void *message, qintptr *result) override {
+        Q_UNUSED(result);
+        if (eventType == "windows_generic_MSG") {
+            MSG *msg = static_cast<MSG *>(message);
+            if (msg->message == WM_HOTKEY && msg->wParam == HOTKEY_TOGGLE_MODE_ID) {
+                if (m_mgr) {
+                    QMetaObject::invokeMethod(m_mgr, "toggleBlockMode", Qt::QueuedConnection);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+private:
+    BackendManager *m_mgr;
+};
 #endif
 
 using json = nlohmann::json;
@@ -90,6 +114,12 @@ BackendManager::BackendManager(QObject *parent)
 
     reloadStats();
 
+#ifdef _WIN32
+    m_hotkeyFilter = new HotkeyEventFilter(this);
+    QCoreApplication::instance()->installNativeEventFilter(m_hotkeyFilter);
+    registerGlobalHotkey();
+#endif
+
     // 코어 감시 엔진(FocusGuard.exe) 자동 기동 (UAC 관리자 권한 상속)
     QTimer::singleShot(500, this, [this]() {
         startEngine();
@@ -99,6 +129,14 @@ BackendManager::BackendManager(QObject *parent)
 BackendManager::~BackendManager()
 {
     blockSignals(true);
+#ifdef _WIN32
+    unregisterGlobalHotkey();
+    if (m_hotkeyFilter) {
+        QCoreApplication::instance()->removeNativeEventFilter(m_hotkeyFilter);
+        delete m_hotkeyFilter;
+        m_hotkeyFilter = nullptr;
+    }
+#endif
     saveHistory();
     stopEngine();
 }
@@ -135,6 +173,10 @@ void BackendManager::loadSettings()
             m_autoStart = j["autoStart"].get<bool>();
         if (j.contains("trayOnClose"))
             m_trayOnClose = j["trayOnClose"].get<bool>();
+        if (j.contains("toggleShortcut"))
+            m_toggleShortcut = QString::fromStdString(j["toggleShortcut"].get<std::string>());
+        if (j.contains("toggleShortcutEnabled"))
+            m_toggleShortcutEnabled = j["toggleShortcutEnabled"].get<bool>();
         if (j.contains("geminiApiKey")) {
             m_geminiApiKey = QString::fromStdString(j["geminiApiKey"].get<std::string>()).trimmed();
         } else {
@@ -164,6 +206,8 @@ void BackendManager::loadSettings()
         emit toastEnabledChanged();
         emit autoStartChanged();
         emit trayOnCloseChanged();
+        emit toggleShortcutChanged();
+        emit toggleShortcutEnabledChanged();
         emit weeklyMinutesChanged();
         emit geminiApiKeyChanged();
     } catch (...) {
@@ -185,6 +229,8 @@ void BackendManager::saveSettings()
     j["toastEnabled"]  = m_toastEnabled;
     j["autoStart"]     = m_autoStart;
     j["trayOnClose"]   = m_trayOnClose;
+    j["toggleShortcut"] = m_toggleShortcut.toStdString();
+    j["toggleShortcutEnabled"] = m_toggleShortcutEnabled;
     if (!m_geminiApiKey.isEmpty()) {
         j["geminiApiKey"] = m_geminiApiKey.toStdString();
     }
@@ -961,7 +1007,8 @@ QString BackendManager::maskedGeminiApiKey() const
 
 void BackendManager::saveAppSettings(int blockMode, int rstRetry, int pomodoroFocus, int pomodoroRest,
                                      bool toastEnabled, bool autoStart, bool trayOnClose,
-                                     const QString &userName, const QString &targetTime)
+                                     const QString &userName, const QString &targetTime,
+                                     const QString &toggleShortcut, bool toggleShortcutEnabled)
 {
     m_blockMode = blockMode;
     m_rstRetry = rstRetry;
@@ -972,6 +1019,21 @@ void BackendManager::saveAppSettings(int blockMode, int rstRetry, int pomodoroFo
     m_trayOnClose = trayOnClose;
     if (!userName.trimmed().isEmpty()) m_userName = userName.trimmed();
     if (!targetTime.trimmed().isEmpty()) m_targetTime = targetTime.trimmed();
+
+    bool hotkeyChanged = false;
+    if (!toggleShortcut.isEmpty() && m_toggleShortcut != toggleShortcut.trimmed()) {
+        m_toggleShortcut = toggleShortcut.trimmed();
+        emit toggleShortcutChanged();
+        hotkeyChanged = true;
+    }
+    if (m_toggleShortcutEnabled != toggleShortcutEnabled) {
+        m_toggleShortcutEnabled = toggleShortcutEnabled;
+        emit toggleShortcutEnabledChanged();
+        hotkeyChanged = true;
+    }
+    if (hotkeyChanged) {
+        registerGlobalHotkey();
+    }
 
     emit blockModeChanged();
     emit rstRetryChanged();
@@ -985,6 +1047,142 @@ void BackendManager::saveAppSettings(int blockMode, int rstRetry, int pomodoroFo
 
     saveSettings();
     saveWhitelistFile();
+}
+
+void BackendManager::setToggleShortcut(const QString &v)
+{
+    QString trimmed = v.trimmed();
+    if (m_toggleShortcut != trimmed) {
+        m_toggleShortcut = trimmed;
+        emit toggleShortcutChanged();
+        saveSettings();
+        registerGlobalHotkey();
+    }
+}
+
+void BackendManager::setToggleShortcutEnabled(bool v)
+{
+    if (m_toggleShortcutEnabled != v) {
+        m_toggleShortcutEnabled = v;
+        emit toggleShortcutEnabledChanged();
+        saveSettings();
+        if (v) registerGlobalHotkey();
+        else unregisterGlobalHotkey();
+    }
+}
+
+void BackendManager::toggleBlockMode()
+{
+    m_blockMode = (m_blockMode == 0) ? 1 : 0;
+    emit blockModeChanged();
+    saveSettings();
+    saveWhitelistFile();
+
+    QString modeTitle = (m_blockMode == 0) ? "🚨 엄격 모드 (Default-Deny)" : "🔓 유연 모드 (Blacklist)";
+    QString modeMsg = (m_blockMode == 0)
+        ? "화이트리스트 등록 사이트만 접속 허용됩니다 (미등록 차단 ON)."
+        : "미등록 사이트 접속이 허용됩니다 (블랙리스트만 차단 OFF).";
+
+    if (m_toastEnabled) {
+        emit trayNotificationRequested(modeTitle, modeMsg);
+    }
+    qDebug() << "[BackendManager] Block mode toggled to:" << (m_blockMode == 0 ? "Strict" : "Flexible");
+}
+
+void BackendManager::registerGlobalHotkey()
+{
+    unregisterGlobalHotkey();
+    if (!m_toggleShortcutEnabled || m_toggleShortcut.trimmed().isEmpty()) return;
+
+#ifdef _WIN32
+    QString sc = m_toggleShortcut.trimmed();
+    UINT mods = 0;
+    if (sc.contains("Ctrl", Qt::CaseInsensitive)) mods |= MOD_CONTROL;
+    if (sc.contains("Alt", Qt::CaseInsensitive))  mods |= MOD_ALT;
+    if (sc.contains("Shift", Qt::CaseInsensitive)) mods |= MOD_SHIFT;
+    if (sc.contains("Win", Qt::CaseInsensitive))   mods |= MOD_WIN;
+    mods |= 0x4000; // MOD_NOREPEAT
+
+    QString keyPart = sc;
+    int lastPlus = sc.lastIndexOf('+');
+    if (lastPlus != -1) keyPart = sc.mid(lastPlus + 1).trimmed();
+
+    UINT vk = 0;
+    if (keyPart.startsWith("F", Qt::CaseInsensitive) && keyPart.length() >= 2) {
+        bool ok = false;
+        int fNum = keyPart.mid(1).toInt(&ok);
+        if (ok && fNum >= 1 && fNum <= 24) vk = VK_F1 + (fNum - 1);
+    } else if (keyPart.length() == 1) {
+        QChar c = keyPart.at(0).toUpper();
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) vk = (UINT)c.unicode();
+    } else if (keyPart.compare("Space", Qt::CaseInsensitive) == 0) {
+        vk = VK_SPACE;
+    } else if (keyPart.compare("Tab", Qt::CaseInsensitive) == 0) {
+        vk = VK_TAB;
+    } else if (keyPart.compare("Esc", Qt::CaseInsensitive) == 0 || keyPart.compare("Escape", Qt::CaseInsensitive) == 0) {
+        vk = VK_ESCAPE;
+    }
+
+    if (vk != 0) {
+        if (RegisterHotKey(NULL, HOTKEY_TOGGLE_MODE_ID, mods, vk)) {
+            qDebug() << "[BackendManager] Windows Global Hotkey registered successfully:" << sc << "mods:" << mods << "vk:" << vk;
+        } else {
+            qWarning() << "[BackendManager] Failed to register Windows Global Hotkey (key combination may be in use):" << sc;
+        }
+    }
+#endif
+}
+
+void BackendManager::unregisterGlobalHotkey()
+{
+#ifdef _WIN32
+    UnregisterHotKey(NULL, HOTKEY_TOGGLE_MODE_ID);
+#endif
+}
+
+bool BackendManager::testRegisterShortcut(const QString &keySequence)
+{
+#ifdef _WIN32
+    QString sc = keySequence.trimmed();
+    if (sc.isEmpty()) return false;
+    UINT mods = 0;
+    if (sc.contains("Ctrl", Qt::CaseInsensitive)) mods |= MOD_CONTROL;
+    if (sc.contains("Alt", Qt::CaseInsensitive))  mods |= MOD_ALT;
+    if (sc.contains("Shift", Qt::CaseInsensitive)) mods |= MOD_SHIFT;
+    if (sc.contains("Win", Qt::CaseInsensitive))   mods |= MOD_WIN;
+    mods |= 0x4000;
+
+    QString keyPart = sc;
+    int lastPlus = sc.lastIndexOf('+');
+    if (lastPlus != -1) keyPart = sc.mid(lastPlus + 1).trimmed();
+
+    UINT vk = 0;
+    if (keyPart.startsWith("F", Qt::CaseInsensitive) && keyPart.length() >= 2) {
+        bool ok = false;
+        int fNum = keyPart.mid(1).toInt(&ok);
+        if (ok && fNum >= 1 && fNum <= 24) vk = VK_F1 + (fNum - 1);
+    } else if (keyPart.length() == 1) {
+        QChar c = keyPart.at(0).toUpper();
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) vk = (UINT)c.unicode();
+    } else if (keyPart.compare("Space", Qt::CaseInsensitive) == 0) {
+        vk = VK_SPACE;
+    } else if (keyPart.compare("Tab", Qt::CaseInsensitive) == 0) {
+        vk = VK_TAB;
+    } else if (keyPart.compare("Esc", Qt::CaseInsensitive) == 0 || keyPart.compare("Escape", Qt::CaseInsensitive) == 0) {
+        vk = VK_ESCAPE;
+    }
+    if (vk == 0) return false;
+
+    int testId = 0xBEEE;
+    bool success = RegisterHotKey(NULL, testId, mods, vk);
+    if (success) {
+        UnregisterHotKey(NULL, testId);
+        return true;
+    }
+    return false;
+#else
+    return true;
+#endif
 }
 
 void BackendManager::requestAiUserAnalysis()
