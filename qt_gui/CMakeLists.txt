@@ -21,6 +21,11 @@ set(PROJECT_SOURCES
     main.cpp
     BackendManager.h
     BackendManager.cpp
+    BackendManager_Engine.cpp
+    BackendManager_Filters.cpp
+    BackendManager_History.cpp
+    BackendManager_Ai.cpp
+    BackendManager_Settings.cpp
     FocusNetGuardian.rc
 )
 
