@@ -261,6 +261,15 @@ void BackendManager::loadWhitelistFile()
         }
         emit targetAdapterChanged();
 
+        // 5. block_unregistered (미등록 차단 모드: true = 엄격 0, false = 유연 1)
+        if (j.contains("block_unregistered") && j["block_unregistered"].is_boolean()) {
+            int newMode = j["block_unregistered"].get<bool>() ? 0 : 1;
+            if (m_blockMode != newMode) {
+                m_blockMode = newMode;
+                emit blockModeChanged();
+            }
+        }
+
 
     } catch (...) {
         qDebug() << "[BackendManager] whitelist.json parse error";
@@ -321,7 +330,8 @@ void BackendManager::saveWhitelistFile()
         j["target_adapter"] = "AUTO";
     }
 
-
+    // 5. block_unregistered (미등록 사이트 차단 여부: 엄격 모드(0)이면 true, 유연 모드(1)이면 false)
+    j["block_unregistered"] = (m_blockMode == 0);
 
     // 6. QSaveFile을 사용한 안전하고 원자적인 파일 쓰기
     QSaveFile sFile(m_whitelistFilePath);
@@ -1481,8 +1491,9 @@ void BackendManager::startEngine()
 void BackendManager::stopEngine()
 {
     if (m_engineProcess && m_engineProcess->state() != QProcess::NotRunning) {
-        m_engineLogs.append(QString("[%1] [System] 엔진 종료 시그널 전달 중...").arg(QDateTime::currentDateTime().toString("HH:mm:ss")));
+        m_engineLogs.append(QString("[%1] [System] 엔진 정상 종료 시그널 전달 중...").arg(QDateTime::currentDateTime().toString("HH:mm:ss")));
         emit engineLogsChanged();
+        m_engineProcess->write("q\n");
         m_engineProcess->terminate();
         if (!m_engineProcess->waitForFinished(2000)) {
             m_engineProcess->kill();
