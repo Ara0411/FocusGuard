@@ -23,6 +23,49 @@ Item {
                 avatar: (root.userName && root.userName.length > 0) ? root.userName.charAt(0).toUpperCase() : "U"
                 title: "안녕하세요, " + root.userName + " 님! 👋"
                 subtitle: root.focusSummarySubtitle()
+
+                Rectangle {
+                    implicitWidth: modeRow.implicitWidth + 24
+                    implicitHeight: 34
+                    radius: 17
+                    color: backend.blockMode === 0 ? "#1E1A38" : "#0F2820"
+                    border.width: 1
+                    border.color: backend.blockMode === 0 ? "#8B5CF6" : "#10B981"
+
+                    RowLayout {
+                        id: modeRow
+                        anchors.centerIn: parent
+                        spacing: 8
+                        Rectangle {
+                            width: 8; height: 8; radius: 4
+                            color: backend.blockMode === 0 ? "#A78BFA" : "#34D399"
+                        }
+                        Txt {
+                            text: backend.blockMode === 0 ? "엄격 모드 (Default-Deny)" : "유연 모드 (Blacklist)"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: backend.blockMode === 0 ? "#DDD6FE" : "#A7F3D0"
+                        }
+                        Txt {
+                            text: "전환"
+                            font.pixelSize: 10
+                            color: "#94A3B8"
+                        }
+                    }
+
+                    HoverHandler { id: modeHover; cursorShape: Qt.PointingHandCursor }
+                    ToolTip.visible: modeHover.hovered
+                    ToolTip.delay: 300
+                    ToolTip.text: backend.blockMode === 0
+                        ? "현재 엄격 모드: 화이트리스트 외 전체 차단\n클릭 시 유연 모드(블랙리스트만 차단)로 즉시 전환"
+                        : "현재 유연 모드: 블랙리스트 외 전체 허용\n클릭 시 엄격 모드(화이트리스트 외 차단)로 즉시 전환"
+
+                    TapHandler {
+                        onTapped: {
+                            backend.toggleBlockMode()
+                        }
+                    }
+                }
             }
 
         // ---------- 상단 3단 그리드 ----------

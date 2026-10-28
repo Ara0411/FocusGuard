@@ -1,6 +1,7 @@
 #include "BackendManager.h"
 #include <QFile>
 #include <QSaveFile>
+#include <QFileInfo>
 #include <QDir>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -608,6 +609,17 @@ void BackendManager::reloadStats()
                 }
             }
         }
+    }
+
+    // ── whitelist.json 외부 변경 감지 (코어 엔진 콘솔에서 'u' 키 등을 눌러 모드 변경 시 실시간 GUI 반영) ──
+    static QDateTime lastWlModified;
+    QFileInfo wlInfo(m_whitelistFilePath);
+    if (wlInfo.exists()) {
+        QDateTime modTime = wlInfo.lastModified();
+        if (lastWlModified.isValid() && modTime > lastWlModified) {
+            loadWhitelistFile();
+        }
+        lastWlModified = modTime;
     }
 
     std::ifstream file(m_statsFilePath.toStdString());

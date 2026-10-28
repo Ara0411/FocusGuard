@@ -129,6 +129,49 @@ Item {
                 notify: root.notifyCount
                 title: "접속 정책 및 차단 앱 관리"
                 subtitle: "네트워크 패킷(SNI·DNS)과 Windows 방해 프로세스를 실시간 차단합니다"
+
+                Rectangle {
+                    implicitWidth: siteModeRow.implicitWidth + 24
+                    implicitHeight: 34
+                    radius: 17
+                    color: backend.blockMode === 0 ? "#1E1A38" : "#0F2820"
+                    border.width: 1
+                    border.color: backend.blockMode === 0 ? "#8B5CF6" : "#10B981"
+
+                    RowLayout {
+                        id: siteModeRow
+                        anchors.centerIn: parent
+                        spacing: 8
+                        Rectangle {
+                            width: 8; height: 8; radius: 4
+                            color: backend.blockMode === 0 ? "#A78BFA" : "#34D399"
+                        }
+                        Txt {
+                            text: backend.blockMode === 0 ? "엄격 모드 (화이트리스트)" : "유연 모드 (블랙리스트)"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: backend.blockMode === 0 ? "#DDD6FE" : "#A7F3D0"
+                        }
+                        Txt {
+                            text: "전환"
+                            font.pixelSize: 10
+                            color: "#94A3B8"
+                        }
+                    }
+
+                    HoverHandler { id: siteModeHover; cursorShape: Qt.PointingHandCursor }
+                    ToolTip.visible: siteModeHover.hovered
+                    ToolTip.delay: 300
+                    ToolTip.text: backend.blockMode === 0
+                        ? "현재 엄격 모드: 허용 목록 외 미등록 사이트 전체 차단 중\n클릭 시 유연 모드로 즉시 전환"
+                        : "현재 유연 모드: 차단 목록 등록 사이트만 차단 중\n클릭 시 엄격 모드로 즉시 전환"
+
+                    TapHandler {
+                        onTapped: {
+                            backend.toggleBlockMode()
+                        }
+                    }
+                }
             }
 
             // ---------- 탭 스위처 (3단) ----------
