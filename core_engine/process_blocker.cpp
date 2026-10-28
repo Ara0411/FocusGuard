@@ -14,7 +14,7 @@ struct AutoHandle {
     operator HANDLE() const { return h; }
 };
 
-//대소문자 무시 문자열 비교 함수
+// 대소문자 무시 문자열 비교 함수
 bool iequals(const std::string& a, const std::string& b) {
     return std::equal(a.begin(), a.end(), b.begin(), b.end(),
         [](char a, char b) {
@@ -25,7 +25,7 @@ bool iequals(const std::string& a, const std::string& b) {
 void process_blocker_func()
 {
     std::cout << "[process_blocker] 앱 차단 모니터링 스레드가 시작되었습니다." << std::endl;
-    while (true) {
+    while (g_is_running.load()) {
         // 0.2초마다 검사 (타임 갭 최소화)
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
@@ -80,4 +80,5 @@ void process_blocker_func()
 
         } while (Process32Next(hProcessSnap, &pe32));
     }
+    std::cout << "[process_blocker] 앱 차단 모니터링 스레드가 종료되었습니다." << std::endl;
 }

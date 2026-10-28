@@ -14,3 +14,8 @@ HANDLE g_hIocp = NULL;
 PacketTxQueue g_outbound_queue;
 std::atomic<bool> g_is_paused(false);
 std::string g_target_adapter = "";
+
+// ── 신규 추가: 정상 종료 및 미등록 차단 기능 전역 인스턴스 ──
+std::atomic<bool> g_is_running(true);
+std::atomic<bool> g_block_unregistered(true);
+pcap_t* g_adhandle = nullptr;

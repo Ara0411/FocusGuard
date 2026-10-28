@@ -146,75 +146,66 @@ void StatsLogger::LogProcessKilled(const std::string& exeName) {
 
 void StatsLogger::SaveToFile(const std::string& filepath) {
     std::lock_guard<std::mutex> lock(mtx_);
+
+    json j;
+    j["start_time"] = start_time_;
+    j["first_block_time"] = first_block_time_;
     
-    try {
-        json j;
-        j["start_time"] = start_time_;
-        j["first_block_time"] = first_block_time_;
-        
-        // 집중도 계산 (Score)
-        // Score = (1 - (blocked + killed) / (normal + blocked + killed)) * 100
-        int total_activities = conn_normal_cnt_ + conn_blocked_cnt_ + process_killed_cnt_;
-        double score = 100.0;
-        if (total_activities > 0) {
-            int bad_activities = conn_blocked_cnt_ + process_killed_cnt_;
-            score = (1.0 - (double)bad_activities / total_activities) * 100.0;
-        }
-        j["focus_score_percent"] = score;
-        
-        // Top 5 Domains
-        std::vector<std::pair<std::string, int>> domain_vec(domain_block_counts_.begin(), domain_block_counts_.end());
-        std::sort(domain_vec.begin(), domain_vec.end(), [](const auto& a, const auto& b) {
-            return a.second > b.second;
-        });
-        
-        json top_domains = json::object();
-        for (size_t i = 0; i < domain_vec.size() && i < 5; ++i) {
-            top_domains[domain_vec[i].first] = domain_vec[i].second;
-        }
-        j["top_blocked_domains"] = top_domains;
-        
-        // Recent Logs (최대 50개, GUI 실시간 로그 표시용)
-        json recent_logs = json::array();
-        for (const auto& log : recent_blocks_) {
-            char time_buf[64];
-            struct tm timeinfo;
-#ifdef _WIN32
-            localtime_s(&timeinfo, &log.first);
-#else
-            localtime_r(&log.first, &timeinfo);
-#endif
-            strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &timeinfo);
-            
-            json log_obj;
-            log_obj["time"] = std::string(time_buf);
-            log_obj["domain"] = log.second;
-            recent_logs.push_back(log_obj);
-        }
-        j["recent_logs"] = recent_logs;
-        
-        j["timeline_24h"] = hourly_blocks_;
-        
-        json raw_stats;
-        raw_stats["normal_connections"] = conn_normal_cnt_;
-        raw_stats["blocked_connections"] = conn_blocked_cnt_;
-        raw_stats["killed_processes"] = process_killed_cnt_;
-        j["raw_stats"] = raw_stats;
-        
-        // 원자적 파일 저장: .tmp 파일에 먼저 쓴 뒤 rename으로 교체
-        // → GUI가 반쯤 쓰인 JSON을 읽는 경쟁 조건 방지
-        std::string tmp_filepath = filepath + ".tmp";
-        std::ofstream file(tmp_filepath);
-        if (file.is_open()) {
-            file << j.dump(4);
-            file.close();
-#ifdef _WIN32
-            MoveFileExA(tmp_filepath.c_str(), filepath.c_str(), MOVEFILE_REPLACE_EXISTING);
-#else
-            rename(tmp_filepath.c_str(), filepath.c_str());
-#endif
-        }
-    } catch (...) {
-        // 예외 무시
+    // 집중도 계산 (Score)
+    // Score = (1 - (blocked + killed) / (normal + blocked + killed)) * 100
+    int total_activities = conn_normal_cnt_ + conn_blocked_cnt_ + process_killed_cnt_;
+    double score = 100.0;
+    if (total_activities > 0) {
+        int bad_activities = conn_blocked_cnt_ + process_killed_cnt_;
+        score = (1.0 - (double)bad_activities / total_activities) * 100.0;
     }
+    j["focus_score_percent"] = score;
+    
+    // Top 5 Domains
+    std::vector<std::pair<std::string, int>> domain_vec(domain_block_counts_.begin(), domain_block_counts_.end());
+    std::sort(domain_vec.begin(), domain_vec.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
+    
+    json top_domains = json::object();
+    for (size_t i = 0; i < domain_vec.size() && i < 5; ++i) {
+        top_domains[domain_vec[i].first] = domain_vec[i].second;
+    }
+    j["top_blocked_domains"] = top_domains;
+    
+    // Recent Logs (최대 50개, GUI 실시간 로그 표시용)
+    json recent_logs = json::array();
+    for (const auto& log : recent_blocks_) {
+        char time_buf[64];
+        struct tm timeinfo;
+#ifdef _WIN32
+        localtime_s(&timeinfo, &log.first);
+#else
+        localtime_r(&log.first, &timeinfo);
+#endif
+        strftime(time_buf, sizeof(time_buf), "%H:%M:%S", &timeinfo);
+        
+        json log_obj;
+        log_obj["time"] = std::string(time_buf);
+        log_obj["domain"] = log.second;
+        recent_logs.push_back(log_obj);
+    }
+    j["recent_logs"] = recent_logs;
+    
+    j["timeline_24h"] = hourly_blocks_;
+    
+    json raw_stats;
+    raw_stats["normal_connections"] = conn_normal_cnt_;
+    raw_stats["blocked_connections"] = conn_blocked_cnt_;
+    raw_stats["killed_processes"] = process_killed_cnt_;
+    j["raw_stats"] = raw_stats;
+    
+    // 통계 데이터를 JSON 파일로 직접 안전하게 저장
+    std::ofstream file(filepath);
+    if (!file.is_open()) {
+        std::cerr << "[Error] StatsLogger::SaveToFile: " << filepath << " 열기 실패" << std::endl;
+        return;
+    }
+    file << j.dump(4);
+    file.close();
 }

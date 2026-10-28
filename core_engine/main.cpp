@@ -2,7 +2,10 @@
 #include "packet_processor.h"
 #include "process_blocker.h"
 #include "watcher.h"
+#include "stats_logger.h"
 #include <windows.h>
+#include <conio.h>
+#include <vector>
 
 // 관리자 권한 확인 함수
 bool IsRunAsAdmin() {
@@ -22,18 +25,56 @@ bool IsRunAsAdmin() {
 }
 
 void cleanup_firewall() {
+    static std::atomic<bool> cleaned(false);
+    if (cleaned.exchange(true)) return;
     system("netsh advfirewall firewall delete rule name=\"Block_QUIC_UDP443\" >nul 2>&1");
     std::cout << "[Info] QUIC 방화벽 차단 규칙을 해제했습니다." << std::endl;
 }
 
-BOOL WINAPI ConsoleHandler(DWORD signal) {
-    if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT) {
-        cleanup_firewall();
+// ── 엔진 정상 종료 처리 함수 ──
+void stop_engine() {
+    static std::atomic<bool> stopping(false);
+    if (stopping.exchange(true)) return;
+
+    std::cout << "\n[System] 🛑 FocusGuard 정상 종료 시퀀스를 진행합니다..." << std::endl;
+    g_is_running.store(false);
+
+    // 1. pcap_loop 루프 탈출
+    if (g_adhandle != nullptr) {
+        pcap_breakloop(g_adhandle);
     }
-    return FALSE; // 기본 핸들러 실행 (프로그램 종료)
+
+    // 2. IOCP 워커 스레드 깨우기 (코어 수만큼 종료 패킷 전송)
+    if (g_hIocp != NULL) {
+        unsigned int num_threads = std::thread::hardware_concurrency();
+        if (num_threads == 0) num_threads = 4;
+        for (unsigned int i = 0; i < num_threads * 2; ++i) {
+            PostQueuedCompletionStatus(g_hIocp, 0, EXIT_COMPLETION_KEY, NULL);
+        }
+    }
+
+    // 3. 아웃바운드 큐 종료
+    g_outbound_queue.Stop();
+
+    // 4. QUIC 방화벽 규칙 해제
+    cleanup_firewall();
+
+    // 5. 최종 통계 저장
+    StatsLogger::GetInstance().SaveToFile("FocusGuard_stats.json");
+    std::cout << "[System] 최종 통계 데이터가 FocusGuard_stats.json에 저장되었습니다." << std::endl;
 }
 
-//콘솔창 마우스 클릭/드래그/스크롤 시 발생하는 출력 블로킹(스레드 멈춤) 방지 함수
+BOOL WINAPI ConsoleHandler(DWORD signal) {
+    if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT || signal == CTRL_BREAK_EVENT) {
+        std::cout << "\n[Console] 종료 시그널 감지! 리소스를 정리합니다..." << std::endl;
+        stop_engine();
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        return TRUE;
+    }
+    return FALSE; // 기본 핸들러 실행
+}
+
+// 콘솔창 마우스 클릭/드래그/스크롤 시 발생하는 출력 블로킹(스레드 멈춤) 방지 함수
 void DisableConsoleQuickEdit() {
     HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
     if (hInput == INVALID_HANDLE_VALUE) return;
@@ -47,8 +88,31 @@ void DisableConsoleQuickEdit() {
     }
 }
 
+// ── 콘솔 키보드 단축키 감시 스레드 ──
+void console_input_func() {
+    while (g_is_running.load()) {
+        if (_kbhit()) {
+            int ch = _getch();
+            // 특수키/확장키 2바이트 처리
+            if (ch == 0 || ch == 224) {
+                _getch();
+                continue;
+            }
+
+            if (ch == 'q' || ch == 'Q') {
+                std::cout << "\n[단축키 'Q'] 정상 종료가 요청되었습니다." << std::endl;
+                stop_engine();
+                break;
+            } else if (ch == 'u' || ch == 'U') {
+                toggle_block_unregistered();
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
 int main() {
-    SetConsoleOutputCP(CP_UTF8); //  터미널 한글 깨짐 영구 방지
+    SetConsoleOutputCP(CP_UTF8); // 터미널 한글 깨짐 영구 방지
     SetConsoleCP(CP_UTF8);       // 터미널 한글 깨짐 영구 방지
 
     // ============================================================
@@ -63,15 +127,14 @@ int main() {
 
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
     atexit(cleanup_firewall);
+
     // ============================================================
     // [보안/차단 강화] QUIC 프로토콜(UDP 443) 원천 차단 방화벽 규칙 등록
-    // 크롬 등 최신 브라우저는 ICMP 위조 패킷을 무시하고 QUIC 연결을 고집할 수 있습니다.
-    // 윈도우 방화벽 단에서 UDP 443을 차단하면 브라우저는 즉시 TCP(HTTPS)로 Fallback합니다.
     // ============================================================
     system("netsh advfirewall firewall add rule name=\"Block_QUIC_UDP443\" dir=out action=block protocol=UDP remoteport=443 >nul 2>&1");
     std::cout << "[Info] QUIC (UDP 443) 차단 방화벽 규칙을 적용했습니다." << std::endl;
 
-    //출력 블로킹(스레드 멈춤) 방지 함수 호출
+    // 출력 블로킹(스레드 멈춤) 방지 함수 호출
     DisableConsoleQuickEdit();
    
     pcap_if_t* alldevs;
@@ -82,6 +145,7 @@ int main() {
     // 1. 시스템의 모든 네트워크 어댑터 찾기
     if (pcap_findalldevs(&alldevs, errbuf) == -1) {
         std::cerr << "어댑터를 찾을 수 없습니다: " << errbuf << std::endl;
+        cleanup_firewall();
         return -1;
     }
 
@@ -151,6 +215,7 @@ int main() {
     if (target_dev == NULL) {
         std::cerr << "[Error] 사용 가능한 네트워크 인터페이스가 없습니다." << std::endl;
         pcap_freealldevs(alldevs);
+        cleanup_firewall();
         return -1;
     }
 
@@ -161,26 +226,27 @@ int main() {
         target_dev->name,   // 장치 이름
         1500,               // 패킷 최대 길이 (MTU 사이즈 슬라이싱으로 메모리/CPU 최적화)
         1,                  // Promiscuous 모드 (모든 패킷 캡처)
-        1,                  // 읽기 타임아웃 (1000ms -> 1ms로 줄여서 RST 발사 지연 완벽 방지)
+        1,                  // 읽기 타임아웃 (1ms로 줄여서 RST 발사 지연 방지)
         errbuf              // 에러 버퍼
     );
 
     if (adhandle == NULL) {
         std::cerr << "어댑터를 열 수 없습니다: " << target_dev->description << std::endl;
         pcap_freealldevs(alldevs);
+        cleanup_firewall();
         return -1;
     }
 
-    // Npcap 커널 버퍼 대폭 확장 (기본 1MB -> 50MB)
-    // 엄청나게 빠른 새로고침(F5) 연타 시 패킷 병목으로 인한 유실(Bypass) 완벽 방지
-    pcap_setbuff(adhandle, 50 * 1024 * 1024);
+    // 전역 핸들에 등록 (pcap_breakloop를 위해)
+    g_adhandle = adhandle;
 
+    // Npcap 커널 버퍼 대폭 확장 (기본 1MB -> 50MB)
+    pcap_setbuff(adhandle, 50 * 1024 * 1024);
     pcap_freealldevs(alldevs);
 
     // ============================================================
     // BPF(Berkeley Packet Filter) 설정
     // ============================================================
-    // 80, 443 포트와 관련된 TCP 트래픽, QUIC 트래픽(UDP 443), 및 DNS 질의(pc에서 나가는 패킷)것들만 수신하도록 설정
     struct bpf_program fcode;
     const char* filter_exp = "tcp port 80 or tcp port 443 or udp port 443 or (udp dst port 53)";
     if (pcap_compile(adhandle, &fcode, filter_exp, 1, PCAP_NETMASK_UNKNOWN) < 0) {
@@ -193,45 +259,57 @@ int main() {
         }
     }
 
-    
-    // 위조 패킷 발사 스레드 생성
-    //
-    // 워커 스레드들이 아웃바운드 큐(g_outbound_queue)에 넣은 위조 RST/ICMP 패킷을
-    // pcap_sendpacket()을 호출하여 발사 (경쟁 상태 방지)
-    std::thread sender_thread(packet_sender_func, adhandle);
-    sender_thread.detach();
+    // ============================================================
+    // 스레드 풀 및 백그라운드 관리 스레드 기동
+    // ============================================================
+    std::vector<std::thread> worker_threads;
 
-    // ============================================================
-    // IOCP 초기화 및 워커 스레드 생성
-    // ============================================================
-    // 1. 전역 IOCP 큐 생성
+    // 1. 위조 패킷 발사 스레드
+    worker_threads.emplace_back(packet_sender_func, adhandle);
+
+    // 2. 전역 IOCP 큐 생성 및 Consumer 워커 스레드 풀 생성
     g_hIocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
-
-    // 2. CPU 코어 개수 파악
     unsigned int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4; // 코어 수를 못 가져올 경우 기본 4개
+    if (num_threads == 0) num_threads = 4;
 
-    // 3. 코어 수만큼 Consumer 스레드 생성
     for (unsigned int i = 0; i < num_threads; i++) {
-        std::thread consumer_thread(consumer_func, adhandle);
-        consumer_thread.detach();
+        worker_threads.emplace_back(consumer_func, adhandle);
     }
-    std::cout << "[IOCP] " << num_threads << "개의 병렬 Worker 스레드가 기동되었습니다.\n" << std::endl;
+    std::cout << "[IOCP] " << num_threads << "개의 병렬 Worker 스레드가 기동되었습니다." << std::endl;
 
-    // 프로세스 차단 관리자 스레드 기동
-    std::thread process_thread(process_blocker_func);
-    process_thread.detach();
+    // 3. 프로세스 차단 관리자 스레드 기동
+    worker_threads.emplace_back(process_blocker_func);
 
-    // whitelist.json 파일 변경 여부 확인 및 통계 스레드 기동 (핫 리로드 및 TTL 정리)
-    std::thread watcher_thread(watcher_func);
-    watcher_thread.detach();
+    // 4. 상태 감시 및 통계 스레드 기동
+    worker_threads.emplace_back(watcher_func);
 
-    std::cout << "네트워크 패킷 캡처를 시작합니다... (종료하려면 콘솔 창을 닫아주세요)\n" << std::endl;
+    // 5. 콘솔 키보드 단축키 감시 스레드 기동
+    worker_threads.emplace_back(console_input_func);
 
-    // 4. 무한 루프로 패킷 캡처 수행 (packet_handler 호출)
+    std::cout << "네트워크 패킷 캡처를 시작합니다...\n" << std::endl;
+
+    // 4. 패킷 캡처 루프 수행 (stop_engine()에서 pcap_breakloop() 호출 시 루프 탈출)
     pcap_loop(adhandle, 0, packet_handler, (u_char*)adhandle);
 
-    g_outbound_queue.Stop();
+    // 루프 탈출 후 정상 종료 절차 수행
+    stop_engine();
+
+    // 모든 백그라운드 스레드 정상 종료 대기 (Join)
+    std::cout << "[System] 모든 백그라운드 스레드 종료 대기 중..." << std::endl;
+    for (auto& t : worker_threads) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+
+    if (g_hIocp != NULL) {
+        CloseHandle(g_hIocp);
+        g_hIocp = NULL;
+    }
+
     pcap_close(adhandle);
+    g_adhandle = nullptr;
+
+    std::cout << "[System] ✅ FocusGuard가 안전하게 정상 종료되었습니다.\n" << std::endl;
     return 0;
 }

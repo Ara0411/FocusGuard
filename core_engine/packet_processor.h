@@ -5,5 +5,7 @@
 std::string extract_http_host(const u_char* payload, int payload_len);
 std::string extract_sni(const u_char* payload, int payload_len);
 void load_whitelist();
+void toggle_block_unregistered();
+void set_block_unregistered(bool enable, bool save_to_file = true);
 void packet_handler(u_char* /*param*/, const struct pcap_pkthdr* header, const u_char* pkt_data);
 void consumer_func(pcap_t* adhandle);
