@@ -5,7 +5,20 @@ import "../components"
 
 Item {
     id: pgStats
+    property int trendPeriodDays: 7
     readonly property var heatColors: ["#161D2B", "#252C5C", "#3B3499", "#5B4BD6", "#8B74FF"]
+    readonly property var currentTopWasted: {
+        var list = backend.getTopBlockedDomainsHistorical(pgStats.trendPeriodDays, 5)
+        if (list && list.length > 0) return list
+        return root.topWasted
+    }
+    readonly property int currentPeriodBlockedCount: {
+        var total = 0
+        for (var i = 0; i < currentTopWasted.length; ++i) {
+            total += (currentTopWasted[i].count || 0)
+        }
+        return total > 0 ? total : root.totalBlocked
+    }
 
     ScrollView {
         anchors.fill: parent
@@ -35,6 +48,25 @@ Item {
                          + (sun.getMonth() + 1) + "월 " + sun.getDate() + "일 · 이번 주 기준"
                 }
                 subtitle: getWeekRange()
+
+                RowLayout {
+                    spacing: 8
+                    Pill {
+                        text: "역대 누적 " + root.hm(backend.totalAccumulatedMinutes)
+                        fg: "#A5B4FC"
+                        color: "#1E1B4B"
+                    }
+                    Pill {
+                        text: "총 방어 " + backend.totalAccumulatedSessions + "회"
+                        fg: "#FDA4AF"
+                        color: "#2A1420"
+                    }
+                    Pill {
+                        text: "🍅 " + backend.totalAccumulatedRounds + "회 달성"
+                        fg: "#6EE7B7"
+                        color: "#0F2A22"
+                    }
+                }
             }
 
             // ---------- 핵심 메트릭 4열 ----------
@@ -440,8 +472,48 @@ Item {
                             Layout.fillWidth: true
                             spacing: 9
                             Icon { name: "bars"; stroke: "#A5B4FC"; implicitWidth: 19; implicitHeight: 19 }
-                            Txt { text: "주간 집중도 추이"; font.pixelSize: 14; font.weight: Font.DemiBold }
+                            Txt { text: pgStats.trendPeriodDays === 30 ? "최근 30일 몰입 추이" : "주간 집중도 추이"; font.pixelSize: 14; font.weight: Font.DemiBold }
                             Item { Layout.fillWidth: true }
+
+                            // [7일] / [30일] 기간 선택 탭
+                            RowLayout {
+                                spacing: 4
+                                Rectangle {
+                                    implicitWidth: 44; implicitHeight: 24; radius: 6
+                                    color: pgStats.trendPeriodDays === 7 ? "#2D3450" : "#1A202C"
+                                    border.color: pgStats.trendPeriodDays === 7 ? "#6366F1" : "transparent"
+                                    border.width: 1
+                                    Txt { anchors.centerIn: parent; text: "7일"; font.pixelSize: 11; font.weight: pgStats.trendPeriodDays === 7 ? Font.DemiBold : Font.Normal; color: pgStats.trendPeriodDays === 7 ? "#FFFFFF" : "#7C8699" }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            pgStats.trendPeriodDays = 7
+                                            weekCanvas.requestPaint()
+                                            donut.requestPaint()
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    implicitWidth: 48; implicitHeight: 24; radius: 6
+                                    color: pgStats.trendPeriodDays === 30 ? "#2D3450" : "#1A202C"
+                                    border.color: pgStats.trendPeriodDays === 30 ? "#6366F1" : "transparent"
+                                    border.width: 1
+                                    Txt { anchors.centerIn: parent; text: "30일"; font.pixelSize: 11; font.weight: pgStats.trendPeriodDays === 30 ? Font.DemiBold : Font.Normal; color: pgStats.trendPeriodDays === 30 ? "#FFFFFF" : "#7C8699" }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            pgStats.trendPeriodDays = 30
+                                            weekCanvas.requestPaint()
+                                            donut.requestPaint()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item { Layout.preferredWidth: 6 }
+
                             RowLayout {
                                 spacing: 7
                                 Rectangle {
@@ -485,11 +557,19 @@ Item {
                                     ctx.closePath()
                                 }
 
+                                var trendData = backend.getTrendRange(pgStats.trendPeriodDays)
+                                var n = (trendData && trendData.length > 0) ? trendData.length : 7
+
                                 var padL = 44, padB = 28, padT = 12
                                 var plotW = width - padL
                                 var plotH = height - padB - padT
-                                var maxV = Math.max(180, Math.ceil((root.weekGoalMin * 1.3) / 60) * 60)
-                                var n = root.weekMinutes.length
+
+                                var maxValInMinutes = root.weekGoalMin * 1.3
+                                for (var k = 0; k < n; k++) {
+                                    var valK = (trendData && trendData[k]) ? trendData[k].minutes : 0
+                                    if (valK > maxValInMinutes) maxValInMinutes = valK
+                                }
+                                var maxV = Math.max(180, Math.ceil(maxValInMinutes / 60) * 60)
 
                                 ctx.font = "10px 'Malgun Gothic'"
                                 ctx.textBaseline = "middle"
@@ -509,9 +589,10 @@ Item {
 
                                 // 막대
                                 var slot = plotW / n
-                                var bw = Math.min(34, slot * 0.46)
+                                var bw = (n <= 7) ? Math.min(34, slot * 0.46) : Math.max(4, slot * 0.65)
                                 for (var i = 0; i < n; i++) {
-                                    var v = (root.weekMinutes && root.weekMinutes[i] !== undefined) ? root.weekMinutes[i] : 0
+                                    var item = (trendData && trendData[i]) ? trendData[i] : null
+                                    var v = item ? item.minutes : (root.weekMinutes[i] || 0)
                                     var bh = plotH * Math.min(1, v / maxV)
                                     var bx = padL + slot * i + (slot - bw) / 2
                                     var by = padT + plotH - bh
@@ -528,27 +609,42 @@ Item {
                                         }
                                         ctx.fillStyle = grd
                                         ctx.beginPath()
-                                        roundRect(bx, by, bw, Math.max(bh, 4), 5)
+                                        roundRect(bx, by, bw, Math.max(bh, 4), Math.min(5, bw / 2))
                                         ctx.fill()
 
-                                        // 값 라벨
-                                        ctx.fillStyle = hit ? "#C0C8FF" : "#8A94A8"
-                                        ctx.textAlign = "center"
-                                        ctx.fillText(Math.floor(v / 60) + "h " + (v % 60) + "m", bx + bw / 2, by - 11)
+                                        // 값 라벨 (7일일 때만 상단 시간 표시)
+                                        if (n <= 7) {
+                                            ctx.fillStyle = hit ? "#C0C8FF" : "#8A94A8"
+                                            ctx.textAlign = "center"
+                                            ctx.fillText(Math.floor(v / 60) + "h " + (v % 60) + "m", bx + bw / 2, by - 11)
+                                        }
                                     } else {
                                         ctx.fillStyle = "#1E2536"
                                         ctx.beginPath()
                                         roundRect(bx, padT + plotH - 3, bw, 3, 2)
                                         ctx.fill()
 
-                                        ctx.fillStyle = "#465064"
-                                        ctx.textAlign = "center"
-                                        ctx.fillText("-", bx + bw / 2, padT + plotH - 10)
+                                        if (n <= 7) {
+                                            ctx.fillStyle = "#465064"
+                                            ctx.textAlign = "center"
+                                            ctx.fillText("-", bx + bw / 2, padT + plotH - 10)
+                                        }
                                     }
 
-                                    // 요일 라벨
-                                    ctx.fillStyle = "#7C8699"
-                                    ctx.fillText(root.weekLabels[i], bx + bw / 2, padT + plotH + 14)
+                                    // X축 라벨
+                                    if (n <= 7) {
+                                        var wLabel = (item && item.weekday) ? item.weekday : root.weekLabels[i]
+                                        ctx.fillStyle = "#7C8699"
+                                        ctx.textAlign = "center"
+                                        ctx.fillText(wLabel, bx + bw / 2, padT + plotH + 14)
+                                    } else {
+                                        if (i % 5 === 0 || i === n - 1) {
+                                            var dLabel = item ? item.date : ""
+                                            ctx.fillStyle = "#7C8699"
+                                            ctx.textAlign = "center"
+                                            ctx.fillText(dLabel, bx + bw / 2, padT + plotH + 14)
+                                        }
+                                    }
                                 }
 
                                 // 목표 점선
@@ -602,9 +698,10 @@ Item {
                                         var cx = width / 2, cy = height / 2
                                         var r = width / 2 - 6
                                         var lw = 20
+                                        var wastedList = pgStats.currentTopWasted
                                         var total = 0
-                                        for (var i = 0; i < root.topWasted.length; i++)
-                                            total += (root.topWasted[i].count || 0)
+                                        for (var i = 0; i < wastedList.length; i++)
+                                            total += (wastedList[i].count || 0)
                                         if (total === 0) {
                                             ctx.lineWidth = lw
                                             ctx.strokeStyle = "#1E2535"
@@ -618,12 +715,12 @@ Item {
                                         ctx.lineCap = "butt"
                                         var start = -Math.PI / 2
                                         var gap = 0.045
-                                        for (var j = 0; j < root.topWasted.length; j++) {
-                                            var cnt = root.topWasted[j].count || 0
+                                        for (var j = 0; j < wastedList.length; j++) {
+                                            var cnt = wastedList[j].count || 0
                                             if (cnt <= 0) continue
                                             var frac = cnt / total
                                             var end = start + Math.PI * 2 * frac
-                                            ctx.strokeStyle = root.topWasted[j].color || "#7B61FF"
+                                            ctx.strokeStyle = wastedList[j].color || "#7B61FF"
                                             ctx.beginPath()
                                             ctx.arc(cx, cy, r - lw / 2, start + gap / 2, end - gap / 2)
                                             ctx.stroke()
@@ -637,7 +734,7 @@ Item {
                                     spacing: 2
                                     Txt {
                                         Layout.alignment: Qt.AlignHCenter
-                                        text: "총 " + root.totalBlocked + "회"
+                                        text: "총 " + pgStats.currentPeriodBlockedCount + "회"
                                         font.pixelSize: 19; font.weight: Font.DemiBold; color: "#F2F5FB"
                                     }
                                     Txt {
@@ -656,14 +753,14 @@ Item {
                                 Item { Layout.fillHeight: true }
 
                                 Txt {
-                                    visible: root.topWasted.length === 0
+                                    visible: pgStats.currentTopWasted.length === 0
                                     Layout.alignment: Qt.AlignHCenter
                                     text: "아직 차단된 도메인이 없습니다"
                                     font.pixelSize: 12; color: "#5C6579"
                                 }
 
                                 Repeater {
-                                    model: root.topWasted
+                                    model: pgStats.currentTopWasted
                                     delegate: RowLayout {
                                         required property var modelData
                                         Layout.fillWidth: true
@@ -874,6 +971,10 @@ Item {
         }
         function onWeeklyMinutesChanged() {
             if (weekCanvas) weekCanvas.requestPaint()
+        }
+        function onHistoryDataChanged() {
+            if (weekCanvas) weekCanvas.requestPaint()
+            if (donut) donut.requestPaint()
         }
     }
 }

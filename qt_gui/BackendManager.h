@@ -11,6 +11,24 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QDate>
+#include <QMap>
+#include <QVector>
+
+struct DailyRecord {
+    int focusSecs = 0;              // 순수 누적 집중 시간 (초)
+    int blockedAttempts = 0;        // 차단 패킷 수
+    int blockedSessions = 0;        // 딴짓 시도 세션 수
+    int pomodoroRounds = 0;         // 달성 뽀모도로 회차 수
+    QVector<int> hourlyFocusSecs;   // 24시간 각 시간대 집중 초 (24개)
+    QVector<int> hourlyBlocks;      // 24시간 각 시간대 차단 수 (24개)
+    QMap<QString, int> topBlockedDomains; // 차단 도메인별 횟수
+
+    DailyRecord() {
+        hourlyFocusSecs.resize(24, 0);
+        hourlyBlocks.resize(24, 0);
+    }
+};
 
 class BackendManager : public QObject
 {
@@ -76,6 +94,11 @@ class BackendManager : public QObject
     Q_PROPERTY(int         nicIndex         READ nicIndex         WRITE setNicIndex NOTIFY nicIndexChanged)
     Q_PROPERTY(QString     targetAdapter    READ targetAdapter    WRITE setTargetAdapter NOTIFY targetAdapterChanged)
 
+    // ── 장기 데이터 누적 보관 (history_daily.json) ───────────
+    Q_PROPERTY(int totalAccumulatedMinutes READ totalAccumulatedMinutes NOTIFY historyDataChanged)
+    Q_PROPERTY(int totalAccumulatedSessions READ totalAccumulatedSessions NOTIFY historyDataChanged)
+    Q_PROPERTY(int totalAccumulatedRounds READ totalAccumulatedRounds NOTIFY historyDataChanged)
+
 public:
     explicit BackendManager(QObject *parent = nullptr);
     virtual ~BackendManager();
@@ -133,6 +156,11 @@ public:
     QStringList nicList()          const { return m_nicList; }
     int         nicIndex()         const { return m_nicIndex; }
     QString     targetAdapter()    const { return m_targetAdapter; }
+
+    // History Getters (history_daily.json)
+    int         totalAccumulatedMinutes() const;
+    int         totalAccumulatedSessions() const;
+    int         totalAccumulatedRounds()   const;
 
     // Setters
     void setIsPaused(bool v);
@@ -197,8 +225,20 @@ public slots:
     Q_INVOKABLE void requestShowWindow();
     Q_INVOKABLE void quitApp();
 
+    // 장기 누적 통계 쿼리 (history_daily.json)
+    Q_INVOKABLE QVariantMap getDailyStats(const QString &dateStr);
+    Q_INVOKABLE QVariantList getWeeklyMinutesFromHistory();
+    Q_INVOKABLE QVariantList getTrendRange(int daysCount);
+    Q_INVOKABLE QVariantList getTopBlockedDomainsHistorical(int daysCount = 7, int limit = 5);
+    Q_INVOKABLE QVariantList getWeekdayAverages();
+    Q_INVOKABLE int getHeatValue(int dayIdx, int hourIdx);
+    Q_INVOKABLE QString getMostProductiveWeekday();
+    Q_INVOKABLE QString getMostDistractedWeekday();
+    Q_INVOKABLE void flushHistory();
+
 signals:
     void showWindowRequested();
+    void historyDataChanged();
     void focusScoreChanged();
     void elapsedSecsChanged();
     void focusTimeChanged();
@@ -247,6 +287,7 @@ private:
     QString m_whitelistFilePath;
     QString m_pauseFlagPath;
     QString m_settingsFilePath;
+    QString m_historyFilePath;
     QString m_engineExePath;
 
     // 엔진 프로세스 및 로그
@@ -319,5 +360,20 @@ private:
     QString resolveWorkspacePath() const;
     void    loadWhitelistFile();
     void    saveWhitelistFile();
+
+    // 장기 데이터 누적 엔진 헬퍼 (history_daily.json)
+    QMap<QString, DailyRecord> m_dailyHistory;
+    QString m_todayDateStr;
+    int     m_sessionStartFocusSecs       = 0;
+    int     m_sessionStartBlockedAttempts = 0;
+    int     m_sessionStartBlockedSessions = 0;
+    int     m_sessionStartPomodoroRounds  = 0;
+    int     m_historyFlushCounter         = 0;
+
+    void    loadHistory();
+    void    saveHistory();
+    void    ensureTodayRecord();
+    void    updateTodayRecordFromSession();
+    void    refreshWeeklyMinutesFromHistory();
 };
 

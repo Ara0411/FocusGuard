@@ -72,6 +72,8 @@ Testing/
 core_engine/FocusGuard_stats.json
 core_engine/whitelist.json
 qt_gui/user_settings.json
+qt_gui/history_daily.json
+qt_gui/history_daily.json*
 core_engine/pause.flag
 
 # Secrets & Environment variables

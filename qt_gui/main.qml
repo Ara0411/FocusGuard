@@ -310,17 +310,10 @@ ApplicationWindow {
         default:        return "#1D2438"
         }
     }
-    // 요일 7 × 시간 24 히트맵 (오늘 요일은 실시간 타임라인 데이터 연동)
+    // 요일 7 × 시간 24 히트맵 (history_daily.json 실데이터 + 오늘 실시간 연동)
     function heatValue(day, hour) {
-        var d = new Date().getDay()
-        var todayIdx = (d === 0 ? 6 : d - 1)
-        if (day === todayIdx) {
-            var val = (root.hourlyFocus && root.hourlyFocus[hour] !== undefined) ? root.hourlyFocus[hour] : 0
-            if (val <= 0) return 0
-            if (val < 15) return 1
-            if (val < 30) return 2
-            if (val < 45) return 3
-            return 4
+        if (typeof backend !== "undefined" && backend) {
+            return backend.getHeatValue(day, hour)
         }
         return 0
     }
