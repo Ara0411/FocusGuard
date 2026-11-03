@@ -87,10 +87,6 @@ BackendManager::BackendManager(QObject *parent)
 
     reloadStats();
 
-#ifdef _WIN32
-    registerGlobalHotkey();
-#endif
-
     // 코어 감시 엔진(FocusGuard.exe) 자동 기동 (UAC 관리자 권한 상속)
     QTimer::singleShot(500, this, [this]() {
         startEngine();
@@ -100,7 +96,6 @@ BackendManager::BackendManager(QObject *parent)
 BackendManager::~BackendManager()
 {
     blockSignals(true);
-    cleanupGlobalHotkey();
     saveHistory();
     stopEngine();
 }
