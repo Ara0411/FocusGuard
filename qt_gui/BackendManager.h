@@ -61,6 +61,7 @@ class BackendManager : public QObject
     Q_PROPERTY(int          topDomainCount     READ topDomainCount     NOTIFY topDomainCountChanged)
     Q_PROPERTY(QVariantList weeklyMinutes      READ weeklyMinutes      NOTIFY weeklyMinutesChanged)
     Q_PROPERTY(QVariantList blockedProcesses   READ blockedProcesses   NOTIFY blockedProcessesChanged)
+    Q_PROPERTY(QStringList  disabledStudySites READ disabledStudySites NOTIFY disabledStudySitesChanged)
 
     // ── 3. 앱 설정 및 제어 (SettingsPage / DashboardPage) ─────────────────
     Q_PROPERTY(bool    isPaused            READ isPaused            WRITE setIsPaused            NOTIFY isPausedChanged)
@@ -124,6 +125,7 @@ public:
     QVariantList whitelistDomains()      const { return m_whitelistDomains; }
     QVariantList blacklistDomains()      const { return m_blacklistDomains; }
     QVariantList blockedProcesses()      const { return m_blockedProcesses; }
+    QStringList  disabledStudySites()    const { return m_disabledStudySites; }
     QString     topDomain()              const { return m_topDomain; }
     int         topDomainCount()         const { return m_topDomainCount; }
     QVariantList weeklyMinutes()         const { return m_weeklyMinutes; }
@@ -217,6 +219,10 @@ public slots:
                                      bool toastEnabled, bool autoStart, bool trayOnClose,
                                      const QString &userName, const QString &targetTime);
     Q_INVOKABLE void toggleBlockMode();
+    Q_INVOKABLE void openSettingsFolder();
+    Q_INVOKABLE bool createBackup();
+    Q_INVOKABLE bool restoreBackup();
+    Q_INVOKABLE void resetAllStats();
 
     // 5. 사이트 및 앱 차단 CRUD (SitesPage)
     Q_INVOKABLE void addToWhitelist(const QString &domain);
@@ -226,6 +232,7 @@ public slots:
     Q_INVOKABLE void addBlockedProcess(const QString &processName);
     Q_INVOKABLE void removeBlockedProcess(const QString &processName);
     Q_INVOKABLE void removeSelectedSites(int tabIndex, const QStringList &targets);
+    Q_INVOKABLE void toggleStudySiteStatus(const QString &site);
 
     // 6. 시스템 트레이 및 창 제어
     Q_INVOKABLE void showTrayNotification(const QString &title, const QString &message);
@@ -259,6 +266,7 @@ signals:
     void whitelistDomainsChanged();
     void blacklistDomainsChanged();
     void blockedProcessesChanged();
+    void disabledStudySitesChanged();
     void topDomainChanged();
     void topDomainCountChanged();
     void weeklyMinutesChanged();
@@ -364,6 +372,7 @@ private:
     QVariantList m_whitelistDomains;
     QVariantList m_blacklistDomains;
     QVariantList m_blockedProcesses;
+    QStringList  m_disabledStudySites;
     QVariantList m_weeklyMinutes;
 
     // 경로 탐색 및 파일 I/O 헬퍼

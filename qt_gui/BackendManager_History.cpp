@@ -107,6 +107,11 @@ void BackendManager::updateTodayRecordFromSession()
     rec.blockedSessions = m_sessionStartBlockedSessions + m_blockedSessions;
     rec.pomodoroRounds  = qMax(rec.pomodoroRounds, m_sessionStartPomodoroRounds + m_pomodoroRound);
 
+    if (rec.focusSecs > m_bestRecord) {
+        m_bestRecord = rec.focusSecs;
+        emit bestRecordChanged();
+    }
+
     int curHour = QTime::currentTime().hour();
     if (curHour >= 0 && curHour < 24) {
         rec.hourlyFocusSecs[curHour] = qMax(rec.hourlyFocusSecs[curHour], m_elapsedSecs % 3600);

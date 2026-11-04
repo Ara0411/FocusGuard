@@ -480,6 +480,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 6
                             HoverHandler { id: logHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: root.goPage(1) }
                             Txt {
                                 text: "전체 로그 보기"
                                 font.pixelSize: 12
@@ -680,7 +681,7 @@ Item {
                                     border.color: onDuty ? "#1D5745" : "#313B4E"
                                     HoverHandler { cursorShape: Qt.PointingHandCursor }
                                     TapHandler {
-                                        onTapped: root.studySiteModel.setProperty(index, "onDuty", !onDuty)
+                                        onTapped: backend.toggleStudySiteStatus(site)
                                     }
                                     Txt {
                                         anchors.centerIn: parent
@@ -688,12 +689,6 @@ Item {
                                         font.pixelSize: 10
                                         color: onDuty ? "#34D399" : "#7C8699"
                                     }
-                                }
-
-                                Icon {
-                                    name: "kebab"; stroke: "#6E7889"
-                                    implicitWidth: 16; implicitHeight: 16
-                                    HoverHandler { cursorShape: Qt.PointingHandCursor }
                                 }
                             }
                         }
@@ -721,24 +716,6 @@ Item {
                     Icon { name: "bars"; stroke: "#A5B4FC"; implicitWidth: 19; implicitHeight: 19 }
                     Txt { text: "시간대별 차단 현황 (24시간)"; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Item { Layout.fillWidth: true }
-
-                    Rectangle {   // 기간 드롭다운
-                        Layout.preferredWidth: 96
-                        Layout.preferredHeight: 34
-                        radius: 9
-                        color: "#101622"
-                        border.width: 1; border.color: "#242D3E"
-                        HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 14
-                            anchors.rightMargin: 10
-                            Txt { text: "오늘"; font.pixelSize: 12; color: "#C3CBDB" }
-                            Item { Layout.fillWidth: true }
-                            Icon { name: "caret"; stroke: "#7C8699"
-                                   implicitWidth: 15; implicitHeight: 15 }
-                        }
-                    }
                 }
 
                 Item { Layout.preferredHeight: 18 }

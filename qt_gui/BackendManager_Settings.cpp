@@ -5,6 +5,9 @@
 #include <QDir>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QFileInfo>
 #include <nlohmann/json.hpp>
 #include <fstream>
 
@@ -51,6 +54,12 @@ void BackendManager::loadSettings()
                 m_geminiApiKey = QString::fromUtf8(envKey).trimmed();
             }
         }
+        if (j.contains("disabled_study_sites") && j["disabled_study_sites"].is_array()) {
+            m_disabledStudySites.clear();
+            for (auto &el : j["disabled_study_sites"])
+                m_disabledStudySites.append(QString::fromStdString(el.get<std::string>()));
+        }
+
         if (j.contains("weeklyMinutes") && j["weeklyMinutes"].is_array()) {
             m_weeklyMinutes.clear();
             for (auto &el : j["weeklyMinutes"])
@@ -73,6 +82,7 @@ void BackendManager::loadSettings()
         emit autoStartChanged();
         emit trayOnCloseChanged();
         emit weeklyMinutesChanged();
+        emit disabledStudySitesChanged();
         emit geminiApiKeyChanged();
     } catch (...) {
         qDebug() << "[BackendManager] user_settings.json parse error";
@@ -96,6 +106,11 @@ void BackendManager::saveSettings()
     if (!m_geminiApiKey.isEmpty()) {
         j["geminiApiKey"] = m_geminiApiKey.toStdString();
     }
+
+    json arrDisabled = json::array();
+    for (const auto &site : m_disabledStudySites)
+        arrDisabled.push_back(site.toStdString());
+    j["disabled_study_sites"] = arrDisabled;
 
     json arrWeek = json::array();
     for (const auto &v : m_weeklyMinutes)
@@ -195,4 +210,100 @@ void BackendManager::requestShowWindow()
 void BackendManager::quitApp()
 {
     QCoreApplication::quit();
+}
+
+void BackendManager::openSettingsFolder()
+{
+    QFileInfo fi(m_settingsFilePath);
+    QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
+}
+
+bool BackendManager::createBackup()
+{
+    QFileInfo fi(m_settingsFilePath);
+    QString dir = fi.absolutePath();
+    QString backupSettings = dir + "/user_settings.backup.json";
+    QString backupWhitelist = dir + "/whitelist.backup.json";
+
+    QFile::remove(backupSettings);
+    bool ok1 = QFile::copy(m_settingsFilePath, backupSettings);
+
+    QString wlPath = dir + "/whitelist.json";
+    QFile::remove(backupWhitelist);
+    bool ok2 = QFile::copy(wlPath, backupWhitelist);
+
+    qDebug() << "[BackendManager] createBackup result:" << ok1 << ok2;
+    return ok1 || ok2;
+}
+
+bool BackendManager::restoreBackup()
+{
+    QFileInfo fi(m_settingsFilePath);
+    QString dir = fi.absolutePath();
+    QString backupSettings = dir + "/user_settings.backup.json";
+    QString backupWhitelist = dir + "/whitelist.backup.json";
+
+    if (QFile::exists(backupSettings)) {
+        QFile::remove(m_settingsFilePath);
+        QFile::copy(backupSettings, m_settingsFilePath);
+        loadSettings();
+    }
+    if (QFile::exists(backupWhitelist)) {
+        QString wlPath = dir + "/whitelist.json";
+        QFile::remove(wlPath);
+        QFile::copy(backupWhitelist, wlPath);
+        loadWhitelistFile();
+    }
+    return true;
+}
+
+void BackendManager::resetAllStats()
+{
+    m_elapsedSecs = 0;
+    m_focusTime = "00:00:00";
+    m_blockedAttempts = 0;
+    m_blockedSessions = 0;
+    m_blockedSecs = 0;
+    m_blockedTime = "00:00:00";
+    m_bestRecord = 0;
+    m_focusScore = 0;
+    m_recentLogs.clear();
+    m_topBlockedDomains.clear();
+    m_topDomain = "-";
+    m_topDomainCount = 0;
+    m_pomodoroRound = 0;
+
+    m_timelineData = QVariantList();
+    for (int i = 0; i < 24; ++i) m_timelineData.append(0);
+
+    m_weeklyMinutes = QVariantList();
+    for (int i = 0; i < 7; ++i) m_weeklyMinutes.append(0);
+
+    emit elapsedSecsChanged();
+    emit focusTimeChanged();
+    emit blockedAttemptsChanged();
+    emit blockedSecsChanged();
+    emit blockedTimeChanged();
+    emit bestRecordChanged();
+    emit focusScoreChanged();
+    emit recentLogsChanged();
+    emit topBlockedDomainsChanged();
+    emit topDomainChanged();
+    emit topDomainCountChanged();
+    emit pomodoroRoundChanged();
+    emit timelineDataChanged();
+    emit weeklyMinutesChanged();
+
+    saveSettings();
+
+    // FocusGuard_stats.json 초기화
+    QFile::remove("FocusGuard_stats.json");
+    QFile::remove("core_engine/FocusGuard_stats.json");
+
+    // history_daily.json 초기화
+    QFile::remove("history_daily.json");
+    QFile::remove("core_engine/history_daily.json");
+    emit historyDataChanged();
+
+    qDebug() << "[BackendManager] All statistics and block records have been reset.";
 }

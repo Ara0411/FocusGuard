@@ -330,3 +330,45 @@ void BackendManager::toggleBlockMode()
     }
     qDebug() << "[BackendManager] Block mode toggled to:" << (m_blockMode == 0 ? "Strict" : "Flexible");
 }
+
+void BackendManager::toggleStudySiteStatus(const QString &site)
+{
+    QString domain = site.trimmed().toLower();
+    if (domain.isEmpty()) return;
+
+    if (m_disabledStudySites.contains(domain, Qt::CaseInsensitive)) {
+        // [중지됨 -> 활성화]
+        for (int i = m_disabledStudySites.size() - 1; i >= 0; --i) {
+            if (m_disabledStudySites[i].compare(domain, Qt::CaseInsensitive) == 0) {
+                m_disabledStudySites.removeAt(i);
+            }
+        }
+        emit disabledStudySitesChanged();
+        saveSettings();
+
+        // whitelist.json 에 복구 추가
+        addToWhitelist(domain);
+        qDebug() << "[BackendManager] Study site re-activated:" << domain;
+    } else {
+        // [활성화 -> 중지됨]
+        if (!m_disabledStudySites.contains(domain, Qt::CaseInsensitive)) {
+            m_disabledStudySites.append(domain);
+            emit disabledStudySitesChanged();
+            saveSettings();
+        }
+
+        // whitelist.json 및 메모리 캐시에서 일시 제외
+        bool changed = false;
+        for (int i = m_whitelistDomains.size() - 1; i >= 0; --i) {
+            if (m_whitelistDomains[i].toString().compare(domain, Qt::CaseInsensitive) == 0) {
+                m_whitelistDomains.removeAt(i);
+                changed = true;
+            }
+        }
+        if (changed) {
+            emit whitelistDomainsChanged();
+            saveWhitelistFile();
+        }
+        qDebug() << "[BackendManager] Study site paused:" << domain;
+    }
+}

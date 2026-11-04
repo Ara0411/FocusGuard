@@ -308,52 +308,27 @@ Item {
 
                         Item { Layout.fillWidth: true }
 
-                        Rectangle {
-                            width: 32; height: 32; radius: 8
-                            color: "transparent"
-                            border.width: 1; border.color: "#2D3648"
-                            HoverHandler { cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: root.logPage = Math.max(1, root.logPage - 1) }
-                            Icon { anchors.centerIn: parent; name: "chevron-left"; stroke: "#8A94A8"
-                                   implicitWidth: 14; implicitHeight: 14 }
-                        }
-
-                        Repeater {
-                            model: 5
-                            delegate: Rectangle {
-                                required property int index
-                                property bool on: (index + 1) === root.logPage
-                                width: 32; height: 32; radius: 8
-                                color: on ? "#2A3348" : (pgHover.hovered ? "#1A2130" : "transparent")
-                                border.width: 1
-                                border.color: on ? "#3A4560" : "#2D3648"
-                                HoverHandler { id: pgHover; cursorShape: Qt.PointingHandCursor }
-                                TapHandler { onTapped: root.logPage = index + 1 }
-                                Txt {
-                                    anchors.centerIn: parent
-                                    text: index + 1
-                                    font.pixelSize: 12
-                                    color: parent.on ? "#EDF0FA" : "#8A94A8"
-                                }
-                            }
-                        }
-
-                        Txt { text: "…"; font.pixelSize: 13; color: "#6A7488" }
-
-                        Rectangle {
-                            width: 32; height: 32; radius: 8
-                            color: "transparent"
-                            border.width: 1; border.color: "#2D3648"
-                            HoverHandler { cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: root.logPage = Math.min(root.logPageCount, root.logPage + 1) }
-                            Icon { anchors.centerIn: parent; name: "chevron"; stroke: "#8A94A8"
-                                   implicitWidth: 14; implicitHeight: 14 }
-                        }
-
                         Txt {
-                            Layout.leftMargin: 6
-                            text: root.logPage + " / " + root.logPageCount + " 페이지"
-                            font.pixelSize: 12; color: "#6A7488"
+                            text: "총 " + root.logTableModel.count + "건 감지됨"
+                            font.pixelSize: 12; color: "#7C8699"
+                        }
+
+                        Item { Layout.preferredWidth: 8 }
+
+                        Rectangle {
+                            implicitWidth: topRow.implicitWidth + 20
+                            height: 32; radius: 8
+                            color: topHover.hovered ? "#222D42" : "#172030"
+                            border.width: 1; border.color: topHover.hovered ? "#4550A8" : "#2D3648"
+                            HoverHandler { id: topHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: logView.positionViewAtBeginning() }
+                            RowLayout {
+                                id: topRow
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Icon { name: "chevron"; stroke: "#A5B4FC"; implicitWidth: 12; implicitHeight: 12; rotation: -90 }
+                                Txt { text: "맨 위로 이동"; font.pixelSize: 12; color: "#D3DAE8" }
+                            }
                         }
                     }
                 }

@@ -55,7 +55,7 @@ ApplicationWindow {
     property int    bestRecord:   backend.bestRecord
     property string userName:     backend.userName
     property int    focusHours:   Math.floor(timerCount / 3600)
-    property int    notifyCount:  0
+    property int    notifyCount:  backend.blockedAttempts
 
     function focusSummarySubtitle() {
         if (timerCount < 60) {
@@ -141,13 +141,17 @@ ApplicationWindow {
     }
 
     function updateWhitelist() {
-        var list = backend.whitelistDomains
-        if (!list || list.length === 0) return
+        var list = backend.whitelistDomains || []
+        var disabledList = backend.disabledStudySites || []
+        if (list.length === 0 && disabledList.length === 0) return
+
         whiteListModel.clear()
         policyWhiteModel.clear()
         studySiteModel.clear()
 
         var today = new Date().toISOString().slice(0, 10)
+
+        // 1. 활성화된 화이트리스트 사이트
         for (var i = 0; i < list.length; ++i) {
             var domain = list[i]
             var cat = "기타"
@@ -158,6 +162,17 @@ ApplicationWindow {
             whiteListModel.append({ site: domain, tag: cat })
             studySiteModel.append({ site: domain, note: "(" + cat + ")", tag: cat, onDuty: true })
             policyWhiteModel.append({ site: domain, cat: cat, date: today, memo: "등록됨", onDuty: true })
+        }
+
+        // 2. 사용자가 일시 중지한 공부 필수 사이트
+        for (var j = 0; j < disabledList.length; ++j) {
+            var dSite = disabledList[j]
+            var dCat = "기타"
+            if (dSite.indexOf("github") !== -1 || dSite.indexOf("vscode") !== -1) dCat = "개발"
+            else if (dSite.indexOf("ebs") !== -1 || dSite.indexOf("eclass") !== -1 || dSite.indexOf("yuhan") !== -1) dCat = "인강/사전"
+            else if (dSite.indexOf("naver") !== -1 || dSite.indexOf("google") !== -1) dCat = "사전/포털"
+
+            studySiteModel.append({ site: dSite, note: "(" + dCat + ")", tag: dCat, onDuty: false })
         }
     }
 
@@ -191,6 +206,9 @@ ApplicationWindow {
             root.updateLogs()
         }
         function onWhitelistDomainsChanged() {
+            root.updateWhitelist()
+        }
+        function onDisabledStudySitesChanged() {
             root.updateWhitelist()
         }
         function onBlacklistDomainsChanged() {
@@ -562,7 +580,8 @@ ApplicationWindow {
         if (t.length === 0) return
         studySiteModel.append({ site: t, note: "(인강/사전)", tag: "인강/사전", onDuty: true })
         whiteListModel.append({ site: t, tag: "인강/사전" })
-        policyWhiteModel.append({ site: t, cat: "인강/사전", date: "2026-09-16",
+        var today = new Date().toISOString().slice(0, 10)
+        policyWhiteModel.append({ site: t, cat: "인강/사전", date: today,
                                   memo: "대시보드에서 등록", onDuty: true })
         backend.addToWhitelist(t)
     }

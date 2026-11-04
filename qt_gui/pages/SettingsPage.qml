@@ -847,6 +847,8 @@ Item {
                                 Layout.preferredWidth: 88
                                 Layout.preferredHeight: 40
                                 text: "찾아보기"
+                                glyph: "folder"
+                                onClicked: backend.openSettingsFolder()
                             }
                         }
 
@@ -860,13 +862,26 @@ Item {
                                 Layout.preferredHeight: 40
                                 text: "지금 백업"
                                 glyph: "download"
-                                onClicked: saveToast.show("백업 파일을 저장했습니다")
+                                onClicked: {
+                                    if (backend.createBackup()) {
+                                        saveToast.show("설정 및 차단 목록이 백업되었습니다.")
+                                    } else {
+                                        saveToast.show("백업 생성에 실패했습니다.")
+                                    }
+                                }
                             }
                             GhostBtn {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 40
                                 text: "복원하기"
                                 glyph: "refresh"
+                                onClicked: {
+                                    if (backend.restoreBackup()) {
+                                        saveToast.show("백업에서 설정을 복원했습니다.")
+                                    } else {
+                                        saveToast.show("복원할 백업 파일이 없습니다.")
+                                    }
+                                }
                             }
                         }
 
@@ -911,7 +926,8 @@ Item {
                                 HoverHandler { id: delHover; cursorShape: Qt.PointingHandCursor }
                                 TapHandler {
                                     onTapped: {
-                                        saveToast.show("통계 및 차단 기록이 초기화되었습니다.")
+                                        backend.resetAllStats()
+                                        saveToast.show("모든 통계와 차단 기록이 초기화되었습니다.")
                                     }
                                 }
                                 RowLayout {

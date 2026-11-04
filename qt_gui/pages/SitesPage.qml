@@ -522,6 +522,9 @@ Item {
                                             checked: siteRow.onDuty
                                             onToggled: function(v) {
                                                 pgSites.activeModel.setProperty(siteRow.index, "onDuty", v)
+                                                if (pgSites.tabIndex === 0) {
+                                                    backend.toggleStudySiteStatus(siteRow.site)
+                                                }
                                             }
                                         }
                                     }

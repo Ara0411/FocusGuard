@@ -213,19 +213,31 @@ void BackendManager::reloadStats()
             emit focusScoreChanged();
         }
 
-        // 3. blocked_attempts (패킷 단위 차단 누적 카운트)
+        // 3. blocked_attempts / raw_stats.blocked_connections (차단된 딴짓 횟수)
+        int attempts = 0;
+        bool hasAttempts = false;
         if (j.contains("blocked_attempts")) {
-            m_blockedAttempts = j["blocked_attempts"].get<int>();
+            attempts = j["blocked_attempts"].get<int>();
+            hasAttempts = true;
+        } else if (j.contains("raw_stats") && j["raw_stats"].is_object()) {
+            int blockedConn = j["raw_stats"].value("blocked_connections", 0);
+            int killedProc = j["raw_stats"].value("killed_processes", 0);
+            attempts = blockedConn + killedProc;
+            hasAttempts = true;
+        }
+
+        if (hasAttempts && m_blockedAttempts != attempts) {
+            m_blockedAttempts = attempts;
             emit blockedAttemptsChanged();
         }
 
         // 4. blocked_sessions (의도된 딴짓 시도 세션 수)
+        int sessions = attempts;
         if (j.contains("blocked_sessions")) {
-            m_blockedSessions = j["blocked_sessions"].get<int>();
-            emit blockedSessionsChanged();
-        } else {
-            // 엔진 하위호환: 필드가 없으면 blocked_attempts를 기본값으로 사용
-            m_blockedSessions = m_blockedAttempts;
+            sessions = j["blocked_sessions"].get<int>();
+        }
+        if (m_blockedSessions != sessions) {
+            m_blockedSessions = sessions;
             emit blockedSessionsChanged();
         }
 
@@ -249,10 +261,11 @@ void BackendManager::reloadStats()
             }
         }
 
-        // 6. hourly_blocks
-        if (j.contains("hourly_blocks") && j["hourly_blocks"].is_array()) {
+        // 6. hourly_blocks / timeline_24h
+        std::string timelineKey = j.contains("timeline_24h") ? "timeline_24h" : (j.contains("hourly_blocks") ? "hourly_blocks" : "");
+        if (!timelineKey.empty() && j[timelineKey].is_array()) {
             QVariantList timeline;
-            for (auto &el : j["hourly_blocks"])
+            for (auto &el : j[timelineKey])
                 timeline.append(el.get<int>());
             while (timeline.size() < 24)
                 timeline.append(0);
@@ -262,17 +275,25 @@ void BackendManager::reloadStats()
             }
         }
 
-        // 7. recent_blocks
-        if (j.contains("recent_blocks") && j["recent_blocks"].is_array()) {
+        // 7. recent_logs / recent_blocks
+        std::string logsKey = j.contains("recent_logs") ? "recent_logs" : (j.contains("recent_blocks") ? "recent_blocks" : "");
+        if (!logsKey.empty() && j[logsKey].is_array()) {
             QVariantList logs;
-            for (auto &el : j["recent_blocks"]) {
+            for (auto &el : j[logsKey]) {
                 QVariantMap item;
                 std::string timeStr = el.value("time", "");
                 if (timeStr.size() >= 19)
                     timeStr = timeStr.substr(11, 8); // "HH:MM:SS"만 추출
                 item["time"] = QString::fromStdString(timeStr);
-                item["desc"] = QString::fromStdString(el.value("desc", ""));
-                item["type"] = QString::fromStdString(el.value("type", ""));
+                
+                std::string dom = el.contains("domain") ? el.value("domain", "") : el.value("desc", "");
+                item["domain"] = QString::fromStdString(dom);
+                item["desc"]   = QString::fromStdString(dom);
+                item["type"]   = QString::fromStdString(el.value("type", "TLS"));
+                item["proto"]  = QString::fromStdString(el.value("type", "TLS"));
+                item["reason"] = QString::fromStdString(el.value("reason", "차단 목록 일치"));
+                item["action"] = QString::fromStdString(el.value("action", "접근 차단!"));
+                item["cat"]    = QString::fromStdString(el.value("cat", "차단"));
                 logs.append(item);
             }
             if (m_recentLogs != logs) {
@@ -281,35 +302,60 @@ void BackendManager::reloadStats()
             }
         }
 
-        // 8. top_blocked_domains
-        if (j.contains("top_blocked_domains") && j["top_blocked_domains"].is_array()) {
+        // 8. top_blocked_domains (array 및 object 형식 모두 지원)
+        if (j.contains("top_blocked_domains")) {
             QVariantList topList;
             QString topDom = "없음";
             int topCnt = 0;
             int totalTopCnt = 0;
-
-            for (auto &el : j["top_blocked_domains"]) {
-                int c = el.value("count", 0);
-                totalTopCnt += c;
-            }
-
             QStringList palette = { "#F43F5E", "#8B5CF6", "#3B82F6", "#10B981", "#F59E0B" };
-            int pIdx = 0;
 
-            for (auto &el : j["top_blocked_domains"]) {
-                std::string domain = el.value("domain", "");
-                int count = el.value("count", 0);
-                if (pIdx == 0 && count > 0) {
-                    topDom = QString::fromStdString(domain);
-                    topCnt = count;
+            if (j["top_blocked_domains"].is_array()) {
+                for (auto &el : j["top_blocked_domains"]) {
+                    int c = el.value("count", 0);
+                    totalTopCnt += c;
                 }
-                QVariantMap item;
-                item["name"] = QString::fromStdString(domain);
-                item["count"] = count;
-                item["percent"] = (totalTopCnt > 0) ? (count * 100 / totalTopCnt) : 0;
-                item["color"] = palette[pIdx % palette.size()];
-                pIdx++;
-                topList.append(item);
+                int pIdx = 0;
+                for (auto &el : j["top_blocked_domains"]) {
+                    std::string domain = el.value("domain", "");
+                    int count = el.value("count", 0);
+                    if (pIdx == 0 && count > 0) {
+                        topDom = QString::fromStdString(domain);
+                        topCnt = count;
+                    }
+                    QVariantMap item;
+                    item["name"] = QString::fromStdString(domain);
+                    item["count"] = count;
+                    item["percent"] = (totalTopCnt > 0) ? (count * 100 / totalTopCnt) : 0;
+                    item["color"] = palette[pIdx % palette.size()];
+                    pIdx++;
+                    topList.append(item);
+                }
+            } else if (j["top_blocked_domains"].is_object()) {
+                std::vector<std::pair<std::string, int>> sortedTop;
+                for (auto &[domain, countVal] : j["top_blocked_domains"].items()) {
+                    int count = countVal.is_number() ? countVal.get<int>() : 0;
+                    totalTopCnt += count;
+                    sortedTop.push_back({domain, count});
+                }
+                std::sort(sortedTop.begin(), sortedTop.end(), [](const auto &a, const auto &b) {
+                    return a.second > b.second;
+                });
+
+                int pIdx = 0;
+                for (const auto &pair : sortedTop) {
+                    if (pIdx == 0 && pair.second > 0) {
+                        topDom = QString::fromStdString(pair.first);
+                        topCnt = pair.second;
+                    }
+                    QVariantMap item;
+                    item["name"] = QString::fromStdString(pair.first);
+                    item["count"] = pair.second;
+                    item["percent"] = (totalTopCnt > 0) ? (pair.second * 100 / totalTopCnt) : 0;
+                    item["color"] = palette[pIdx % palette.size()];
+                    pIdx++;
+                    topList.append(item);
+                }
             }
 
             if (m_topBlockedDomains != topList) {
