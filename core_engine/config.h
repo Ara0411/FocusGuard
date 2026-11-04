@@ -39,8 +39,8 @@ struct CapturedPacket : public OVERLAPPED {
     void SetData(const struct pcap_pkthdr* hdr, const u_char* pkt_data) {
         memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
         header = *hdr;
-        // MTU 사이즈(1500) 초과 데이터는 잘라내어 메모리 복사 부하 최소화
-        int copy_len = (hdr->caplen > 1500) ? 1500 : hdr->caplen;
+        // snaplen 65535 적용: 프레임 전체 복사
+        int copy_len = hdr->caplen;
         raw_data.assign(pkt_data, pkt_data + copy_len);
     }
 };
@@ -160,3 +160,24 @@ extern std::atomic<bool> g_is_running; // 엔진 실행 상태 (false 시 모든
 extern std::atomic<bool> g_block_unregistered; // 미등록 사이트 차단 여부 (true: 화이트리스트 모드, false: 블랙리스트 전용 모드)
 extern pcap_t* g_adhandle; // pcap 핸들 전역 참조 (pcap_breakloop 용)
 constexpr ULONG_PTR EXIT_COMPLETION_KEY = 0xDEADBEEF; // IOCP 워커 스레드 정상 종료용 키
+
+// ── 진단 통계 카운터 (재조립 및 프레임 잘림 감시용) ──
+extern std::atomic<uint64_t> g_stat_truncated_frames;
+extern std::atomic<uint64_t> g_stat_reassembly_starts;
+extern std::atomic<uint64_t> g_stat_reassembly_success;
+extern std::atomic<uint64_t> g_stat_reassembly_expired;
+extern std::atomic<uint64_t> g_stat_reassembly_seq_err;
+extern std::atomic<uint64_t> g_stat_reassembly_oom;
+
+// ── TLS 세그먼트 재조립 버퍼 구조체 ──
+struct TlsReassemblyEntry {
+    uint32_t next_expected_seq = 0;      // 다음 기대 TCP 시퀀스 번호
+    uint32_t expected_total_len = 0;     // 기대 총 TLS 레코드 크기 (헤더 5바이트 포함)
+    time_t created_at = 0;               // 세션 생성 시각 (초 단위)
+    std::vector<u_char> accumulated;     // 누적된 페이로드 데이터
+};
+
+extern std::mutex g_reassembly_mutex;
+extern std::unordered_map<uint64_t, TlsReassemblyEntry> g_reassembly_map;
+constexpr size_t MAX_REASSEMBLY_ENTRIES = 2000;    // 동시 재조립 최대 세션 수 상한
+constexpr size_t MAX_REASSEMBLY_BUF_SIZE = 16384;  // 세션당 최대 버퍼 크기 (16KB)

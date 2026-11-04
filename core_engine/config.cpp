@@ -19,3 +19,15 @@ std::string g_target_adapter = "";
 std::atomic<bool> g_is_running(true);
 std::atomic<bool> g_block_unregistered(true);
 pcap_t* g_adhandle = nullptr;
+
+// ── 진단 통계 카운터 인스턴스 ──
+std::atomic<uint64_t> g_stat_truncated_frames(0);
+std::atomic<uint64_t> g_stat_reassembly_starts(0);
+std::atomic<uint64_t> g_stat_reassembly_success(0);
+std::atomic<uint64_t> g_stat_reassembly_expired(0);
+std::atomic<uint64_t> g_stat_reassembly_seq_err(0);
+std::atomic<uint64_t> g_stat_reassembly_oom(0);
+
+// ── TLS 세그먼트 재조립 전역 맵 및 뮤텍스 ──
+std::mutex g_reassembly_mutex;
+std::unordered_map<uint64_t, TlsReassemblyEntry> g_reassembly_map;

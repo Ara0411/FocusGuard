@@ -15,7 +15,8 @@
     "linux.org",
     "dns.google",
     "eclass.yuhan.ac.kr",
-    "notebooklm.google"
+    "notebooklm.google",
+    "generativelanguage.googleapis.com"
   ],
   "blocked_domains": [
     "youtube.com",
@@ -23,6 +24,7 @@
     "googlevideo.com",
     "ytimg.com",
     "ggpht.com",
+    "youtubei.googleapis.com",
     "facebook.com",
     "serv.ds.kakao.com"
   ],

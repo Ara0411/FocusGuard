@@ -201,20 +201,33 @@ void load_whitelist() {
     if (data.contains("target_adapter") && data["target_adapter"].is_string()) {
         g_target_adapter = data["target_adapter"].get<std::string>();
     }
+    bool has_mode = false;
+    bool new_mode = false;
     if (data.contains("block_unregistered") && data["block_unregistered"].is_boolean()) {
-        g_block_unregistered.store(data["block_unregistered"].get<bool>());
+        has_mode = true;
+        new_mode = data["block_unregistered"].get<bool>();
     } else if (data.contains("block_unknown") && data["block_unknown"].is_boolean()) {
-        g_block_unregistered.store(data["block_unknown"].get<bool>());
+        has_mode = true;
+        new_mode = data["block_unknown"].get<bool>();
     }
 
     // 파싱이 성공적으로 끝난 뒤에만 원본 리스트를 교체 (안전한 업데이트)
+    size_t wl_count = 0, bl_count = 0, bp_count = 0;
     {
         std::unique_lock<std::shared_mutex> lock(g_wl_mutex); // 리스트 보호용 뮤텍스 공용 사용
         whitelist_domains = std::move(new_wl);
         blacklist_domains = std::move(new_bl);
         blacklist_process = std::move(new_bl_process);
+        wl_count = whitelist_domains.size();
+        bl_count = blacklist_domains.size();
+        bp_count = blacklist_process.size();
     }
-    std::cout << "[Info] 필터 로드 완료: 허용 " << whitelist_domains.size() << "개 / 도메인 차단 " << blacklist_domains.size() << "개 / 앱 차단 " << blacklist_process.size() << "개";
+
+    // 리스트 교체 완료 후 모드 적용 및 캐시 비우기 (save_to_file=false로 무한 루프 방지)
+    if (has_mode) {
+        set_block_unregistered(new_mode, false);
+    }
+    std::cout << "[Info] 필터 로드 완료: 허용 " << wl_count << "개 / 도메인 차단 " << bl_count << "개 / 앱 차단 " << bp_count << "개";
     if (!g_target_adapter.empty()) {
         std::cout << " / 지정 어댑터: " << g_target_adapter;
     }
@@ -241,12 +254,19 @@ void set_block_unregistered(bool enable, bool save_to_file) {
     } else {
         std::cout << "[모드 변경] 🔓 미등록 사이트 차단: [ OFF ] (블랙리스트 전용 모드)" << std::endl;
         std::cout << "           -> 차단 목록(blacklist) 외 모든 사이트 접속이 허용됩니다." << std::endl;
-        // 차단되었던 미등록 세션 캐시 정리하여 즉시 통신 재개
+        // 차단되었던 미등록 세션 캐시 및 기존 허용 세션 정리하여 즉시 통신/블랙리스트 재적용
         std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+        allowed_conns.clear();
         blocked_conns.clear();
         pending_conns.clear();
     }
     std::cout << "========================================================\n" << std::endl;
+
+    // 모드 전환 시 미완료 재조립 세션 초기화 (g_ip_mutex 스코프 밖에서 독립 획득)
+    {
+        std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
+        g_reassembly_map.clear();
+    }
 
     if (save_to_file) {
         std::lock_guard<std::mutex> file_lock(g_whitelist_file_mtx);
@@ -339,6 +359,11 @@ void consumer_func(pcap_t* adhandle) {
         // 꺼낸 패킷의 원시 바이트 포인터와 헤더 참조
         const u_char* pkt_data = pkt->raw_data.data();
         const struct pcap_pkthdr* header = &pkt->header;
+
+        // ── 잘린 프레임 계측 (패킷 처리 최상단) ──
+        if (header->caplen < header->len) {
+            g_stat_truncated_frames++;
+        }
 
         // ── 패킷 기본 길이 유효성 검사 ──
         if (pkt->raw_data.size() < sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header)) continue;
@@ -467,6 +492,10 @@ void consumer_func(pcap_t* adhandle) {
                 blocked_conns.erase(conn_id);
                 pending_conns.erase(conn_id);
             }
+            {
+                std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
+                g_reassembly_map.erase(conn_id);
+            }
             continue;
         }
 
@@ -495,7 +524,12 @@ void consumer_func(pcap_t* adhandle) {
         }
 
         int tcp_len = ((tcp->data_offset >> 4) * 4);
+        if (tcp_len < 20) continue;
         int payload_len = ntohs(ip->tlen) - ip_len - tcp_len;
+        int max_avail_payload = (int)pkt->raw_data.size() - (int)(sizeof(struct pkt_eth_header) + ip_len + tcp_len);
+        if (payload_len > max_avail_payload) {
+            payload_len = max_avail_payload;
+        }
 
         // 페이로드 없는 핸드셰이크 패킷 (ACK 등) → 통과
         if (payload_len <= 0) continue;
@@ -503,10 +537,108 @@ void consumer_func(pcap_t* adhandle) {
         const u_char* payload = (const u_char*)tcp + tcp_len;
         std::string domain = "";
 
+        // ── 3단계: 재조립 대기 중인 세션인지 확인 (2번째 이후 세그먼트) ──
+        bool is_reassembling = false;
+        bool reassembly_continue = false;
+        bool need_rst = false;
+        const char* rst_reason = nullptr;
+
+        if (dest_port == 443) {
+            std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
+            auto it = g_reassembly_map.find(conn_id);
+            if (it != g_reassembly_map.end()) {
+                is_reassembling = true;
+                uint32_t cur_seq = ntohl(tcp->seq);
+                int32_t seq_diff = (int32_t)(cur_seq - it->second.next_expected_seq);
+
+                if (seq_diff < 0) {
+                    // 재전송 패킷: 이미 수신한 바이트 이전이므로 무시하고 통과
+                    reassembly_continue = true;
+                } else if (seq_diff > 0) {
+                    // 패킷 유실 또는 순서 역전 (Gap 발생): 재조립 실패
+                    g_stat_reassembly_seq_err++;
+                    g_reassembly_map.erase(it);
+                    if (g_block_unregistered.load()) {
+                        need_rst = true;
+                        rst_reason = "Reassembly Seq Error";
+                    }
+                    reassembly_continue = true;
+                } else {
+                    // seq_diff == 0: 정확히 다음 세그먼트 도착
+                    if (it->second.accumulated.size() + payload_len > MAX_REASSEMBLY_BUF_SIZE) {
+                        g_stat_reassembly_oom++;
+                        g_reassembly_map.erase(it);
+                        if (g_block_unregistered.load()) {
+                            need_rst = true;
+                            rst_reason = "Reassembly OOM";
+                        }
+                        reassembly_continue = true;
+                    } else {
+                        it->second.accumulated.insert(it->second.accumulated.end(), payload, payload + payload_len);
+                        it->second.next_expected_seq = cur_seq + payload_len;
+
+                        // 레코드 완성 검사 (3개 이상 분할도 수용)
+                        if (it->second.accumulated.size() >= it->second.expected_total_len) {
+                            domain = extract_sni(it->second.accumulated.data(), (int)it->second.accumulated.size());
+                            g_reassembly_map.erase(it);
+                            g_stat_reassembly_success++;
+                        } else {
+                            // 추가 조각 대기
+                            reassembly_continue = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // g_reassembly_mutex 락 스코프 밖에서 안전하게 RST 발사
+        if (need_rst && rst_reason) {
+            queue_spoofed_rst_packet(pkt_data, header->caplen, rst_reason);
+        }
+
+        if (reassembly_continue) {
+            continue; // allowed/blocked 등록 없이 다음 패킷으로
+        }
+
         if (dest_port == 80) {
             domain = extract_http_host(payload, payload_len);
-        } else if (dest_port == 443) {
+        } else if (dest_port == 443 && !is_reassembling) {
             domain = extract_sni(payload, payload_len);
+        }
+
+        // ── 3단계: 분할된 TLS ClientHello 1번째 세그먼트 감지 및 재조립 시작 ──
+        if (dest_port == 443 && !is_reassembling && domain.empty()) {
+            if (payload_len >= 6 && payload[0] == 0x16 && payload[5] == 0x01) {
+                uint32_t expected_total_len = ((uint32_t)payload[3] << 8 | payload[4]) + 5;
+                if (expected_total_len > (uint32_t)payload_len) {
+                    bool start_oom = false;
+                    {
+                        std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
+                        if (g_reassembly_map.size() >= MAX_REASSEMBLY_ENTRIES || expected_total_len > MAX_REASSEMBLY_BUF_SIZE) {
+                            g_stat_reassembly_oom++;
+                            start_oom = true;
+                        } else {
+                            TlsReassemblyEntry entry;
+                            entry.created_at = time(nullptr);
+                            entry.expected_total_len = expected_total_len;
+                            uint32_t cur_seq = ntohl(tcp->seq);
+                            entry.next_expected_seq = cur_seq + payload_len;
+                            entry.accumulated.assign(payload, payload + payload_len);
+                            g_reassembly_map[conn_id] = std::move(entry);
+                            g_stat_reassembly_starts++;
+                        }
+                    }
+
+                    if (start_oom) {
+                        if (g_block_unregistered.load()) {
+                            queue_spoofed_rst_packet(pkt_data, header->caplen, "Reassembly OOM");
+                        }
+                        continue;
+                    }
+
+                    continue; // allowed_conns / blocked_conns 등록 없이 통과!
+                }
+            }
         }
 
         if (!domain.empty()) {
@@ -534,6 +666,12 @@ void consumer_func(pcap_t* adhandle) {
                             domain.compare(domain.length() - suffix.length(), suffix.length(), suffix) == 0) {
                             is_whitelisted = true; break;
                         }
+                    }
+
+                    // FocusGuard 내부 필수 서비스 바이패스 (Gemini AI 진단 등)
+                    if (!is_whitelisted && (domain == "generativelanguage.googleapis.com" ||
+                                            domain == "googleapis.com")) {
+                        is_whitelisted = true;
                     }
                 }
             } // g_wl_mutex 해제

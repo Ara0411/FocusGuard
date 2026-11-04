@@ -46,8 +46,7 @@ void stop_engine() {
 
     // 2. IOCP 워커 스레드 깨우기 (코어 수만큼 종료 패킷 전송)
     if (g_hIocp != NULL) {
-        unsigned int num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 4;
+        unsigned int num_threads = 1;
         for (unsigned int i = 0; i < num_threads * 2; ++i) {
             PostQueuedCompletionStatus(g_hIocp, 0, EXIT_COMPLETION_KEY, NULL);
         }
@@ -224,7 +223,7 @@ int main() {
     // 3. 어댑터 열기 (캡처 시작)
     pcap_t* adhandle = pcap_open_live(
         target_dev->name,   // 장치 이름
-        1500,               // 패킷 최대 길이 (MTU 사이즈 슬라이싱으로 메모리/CPU 최적화)
+        65535,              // 패킷 최대 길이 (분할 TLS 패킷 잘림 방지)
         1,                  // Promiscuous 모드 (모든 패킷 캡처)
         1,                  // 읽기 타임아웃 (1ms로 줄여서 RST 발사 지연 방지)
         errbuf              // 에러 버퍼
@@ -269,13 +268,12 @@ int main() {
 
     // 2. 전역 IOCP 큐 생성 및 Consumer 워커 스레드 풀 생성
     g_hIocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
-    unsigned int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4;
+    unsigned int num_threads = 1; // 재조립 순서 보장을 위해 단일 스레드로 고정
 
     for (unsigned int i = 0; i < num_threads; i++) {
         worker_threads.emplace_back(consumer_func, adhandle);
     }
-    std::cout << "[IOCP] " << num_threads << "개의 병렬 Worker 스레드가 기동되었습니다." << std::endl;
+    std::cout << "[IOCP] " << num_threads << "개의 Worker 스레드가 기동되었습니다." << std::endl;
 
     // 3. 프로세스 차단 관리자 스레드 기동
     worker_threads.emplace_back(process_blocker_func);

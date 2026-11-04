@@ -43,10 +43,16 @@ void watcher_func() {
 
         // 휴식 → 집중 복귀 감지: 커넥션 캐시 전부 초기화
         if (was_paused && !is_paused_now) {
-            std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
-            allowed_conns.clear();
-            blocked_conns.clear();
-            pending_conns.clear();
+            {
+                std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+                allowed_conns.clear();
+                blocked_conns.clear();
+                pending_conns.clear();
+            }
+            {
+                std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
+                g_reassembly_map.clear();
+            }
             std::cout << "\n[Watcher] ▶ 집중 모드 복귀: 커넥션 캐시 초기화 완료. 차단 재개!" << std::endl;
         }
 
@@ -94,8 +100,53 @@ void watcher_func() {
             }
         }
 
+        // 4-1. 재조립 세션 만료 정리 (3초 초과 시 삭제)
+        {
+            std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
+            for (auto it = g_reassembly_map.begin(); it != g_reassembly_map.end(); ) {
+                if (now - it->second.created_at > 3) {
+                    g_stat_reassembly_expired++;
+                    it = g_reassembly_map.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
         // 5. 통계 데이터 JSON 저장 (UI 렌더링용)
         StatsLogger::GetInstance().SaveToFile("FocusGuard_stats.json");
+
+        // 6. 진단 통계 출력 (잘린 프레임 발생 시)
+        static int diag_tick = 0;
+        if (++diag_tick % 10 == 0) {
+            uint64_t trunc = g_stat_truncated_frames.load();
+            if (trunc > 0) {
+                std::cout << "[Diagnostic Stats] 잘린프레임(caplen < len): " << trunc << std::endl;
+            }
+
+            // ── 재조립 통계 출력: starts > 0이고 값이 이전과 변했을 때만 출력 ──
+            uint64_t starts = g_stat_reassembly_starts.load();
+            if (starts > 0) {
+                uint64_t succ = g_stat_reassembly_success.load();
+                uint64_t exp = g_stat_reassembly_expired.load();
+                uint64_t seq_err = g_stat_reassembly_seq_err.load();
+                uint64_t oom = g_stat_reassembly_oom.load();
+
+                static uint64_t last_starts = 0, last_succ = 0, last_exp = 0, last_seq_err = 0, last_oom = 0;
+                if (starts != last_starts || succ != last_succ || exp != last_exp || seq_err != last_seq_err || oom != last_oom) {
+                    std::cout << "[Diagnostic Stats] TLS재조립: 시작 " << starts 
+                              << " | 성공 " << succ 
+                              << " | 만료 " << exp 
+                              << " | seq오류 " << seq_err 
+                              << " | 맵초과 " << oom << std::endl;
+                    last_starts = starts;
+                    last_succ = succ;
+                    last_exp = exp;
+                    last_seq_err = seq_err;
+                    last_oom = oom;
+                }
+            }
+        }
     }
 
     // 스레드 종료 시 최종 저장
