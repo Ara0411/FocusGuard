@@ -8,6 +8,31 @@ Item {
     property string query: ""
     property string catFilter: "전체"
 
+    function getFilteredCount() {
+        var total = root.logTableModel.count
+        if (pgLogs.catFilter === "전체" && pgLogs.query === "") {
+            return total
+        }
+        var cnt = 0
+        var q = pgLogs.query
+        var cf = pgLogs.catFilter
+        for (var i = 0; i < total; ++i) {
+            var item = root.logTableModel.get(i)
+            if (!item) continue
+            var matchCat = (cf === "전체" || item.cat === cf)
+            var matchQuery = (q === "" || (item.domain && item.domain.toLowerCase().indexOf(q) >= 0))
+            if (matchCat && matchQuery) cnt++
+        }
+        return cnt
+    }
+
+    readonly property int visibleLogCount: {
+        var d1 = pgLogs.query
+        var d2 = pgLogs.catFilter
+        var d3 = root.logTableModel.count
+        return getFilteredCount()
+    }
+
     ScrollView {
         anchors.fill: parent
         clip: true
@@ -118,7 +143,9 @@ Item {
                         }
 
                         Txt {
-                            text: root.logTableModel.count + "건 표시"
+                            text: (pgLogs.catFilter === "전체" && pgLogs.query === "")
+                                  ? (root.logTableModel.count + "건 표시")
+                                  : ("총 " + root.logTableModel.count + "건 중 " + pgLogs.visibleLogCount + "건 표시")
                             font.pixelSize: 12; color: "#6A7488"
                         }
                     }

@@ -61,6 +61,7 @@ Item {
                         root.toastEnabled = true
                         root.autoStart = true
                         root.trayOnClose = true
+                        saveToast.show("기본값이 입력되었습니다. [변경사항 저장]을 눌러 적용하세요.")
                     }
                 }
                 SolidBtn {
