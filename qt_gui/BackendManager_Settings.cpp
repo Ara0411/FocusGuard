@@ -228,9 +228,8 @@ bool BackendManager::createBackup()
     QFile::remove(backupSettings);
     bool ok1 = QFile::copy(m_settingsFilePath, backupSettings);
 
-    QString wlPath = dir + "/whitelist.json";
     QFile::remove(backupWhitelist);
-    bool ok2 = QFile::copy(wlPath, backupWhitelist);
+    bool ok2 = QFile::copy(m_whitelistFilePath, backupWhitelist);
 
     qDebug() << "[BackendManager] createBackup result:" << ok1 << ok2;
     return ok1 || ok2;
@@ -249,9 +248,8 @@ bool BackendManager::restoreBackup()
         loadSettings();
     }
     if (QFile::exists(backupWhitelist)) {
-        QString wlPath = dir + "/whitelist.json";
-        QFile::remove(wlPath);
-        QFile::copy(backupWhitelist, wlPath);
+        QFile::remove(m_whitelistFilePath);
+        QFile::copy(backupWhitelist, m_whitelistFilePath);
         loadWhitelistFile();
     }
     return true;

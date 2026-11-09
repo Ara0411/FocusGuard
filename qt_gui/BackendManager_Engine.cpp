@@ -1,4 +1,5 @@
 #include "BackendManager.h"
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -21,10 +22,15 @@ void BackendManager::startEngine()
     if (m_isEngineRunning) return;
 
     if (!QFile::exists(m_engineExePath)) {
-        QString ws = resolveWorkspacePath();
-        QString candidate = ws + "/core_engine/x64/Debug/FocusGuard.exe";
-        if (QFile::exists(candidate)) m_engineExePath = candidate;
-        else m_engineExePath = ws + "/core_engine/x64/Release/FocusGuard.exe";
+        QString appDir = QCoreApplication::applicationDirPath();
+        if (QFile::exists(appDir + "/FocusGuard.exe")) {
+            m_engineExePath = appDir + "/FocusGuard.exe";
+        } else {
+            QString ws = resolveWorkspacePath();
+            QString candidate = ws + "/core_engine/x64/Release/FocusGuard.exe";
+            if (QFile::exists(candidate)) m_engineExePath = candidate;
+            else m_engineExePath = ws + "/core_engine/x64/Debug/FocusGuard.exe";
+        }
     }
 
     if (!QFile::exists(m_engineExePath)) {

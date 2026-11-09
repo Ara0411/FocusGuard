@@ -18,19 +18,24 @@
 using json = nlohmann::json;
 
 // =============================================================================
-//  경로 탐색: 실행 파일 위치에서 상위 폴더를 타고 올라가 FocusGuard 루트 반환
+//  경로 탐색: 독립 실행(단일 폴더) 및 개발 워크스페이스 동적 인식
 // =============================================================================
 QString BackendManager::resolveWorkspacePath() const
 {
-    QDir d(QCoreApplication::applicationDirPath());
+    QString appDir = QCoreApplication::applicationDirPath();
+    // 1. 단일 배포 폴더(포터블) 우선 인식: 실행 파일과 같은 폴더에 엔진이나 룰이 있는 경우
+    if (QFile::exists(appDir + "/FocusGuard.exe") || QFile::exists(appDir + "/whitelist.json")) {
+        return appDir;
+    }
+    // 2. 개발 워크스페이스 상위 디렉터리 탐색
+    QDir d(appDir);
     for (int i = 0; i < 8; ++i) {   // 최대 8단계 상위 탐색
         if (d.exists("core_engine")) {
             return d.absolutePath();
         }
         if (!d.cdUp()) break;
     }
-    // 못 찾으면 fallback (개발 머신 기본 경로)
-    return "C:/Users/SHIN/Desktop/FG-Work-Space/FocusGuard";
+    return appDir;
 }
 
 // =============================================================================
@@ -39,20 +44,33 @@ QString BackendManager::resolveWorkspacePath() const
 BackendManager::BackendManager(QObject *parent)
     : QObject(parent)
 {
-    // 워크스페이스 루트 자동 탐색
+    QString appDir = QCoreApplication::applicationDirPath();
     QString ws = resolveWorkspacePath();
-    m_statsFilePath     = ws + "/core_engine/FocusGuard_stats.json";
-    m_whitelistFilePath = ws + "/core_engine/whitelist.json";
-    m_pauseFlagPath     = ws + "/core_engine/pause.flag";
-    m_settingsFilePath  = ws + "/qt_gui/user_settings.json";
-    m_historyFilePath   = ws + "/qt_gui/history_daily.json";
+    bool isStandalone = QFile::exists(appDir + "/FocusGuard.exe") || QFile::exists(appDir + "/whitelist.json");
 
-    // 코어 엔진 실행 파일 경로 탐색
-    QString engineCandidate = ws + "/core_engine/x64/Debug/FocusGuard.exe";
-    if (QFile::exists(engineCandidate)) {
-        m_engineExePath = engineCandidate;
+    if (isStandalone) {
+        // 독립 배포 폴더 (포터블 릴리즈 패키지 모드)
+        m_statsFilePath     = appDir + "/FocusGuard_stats.json";
+        m_whitelistFilePath = appDir + "/whitelist.json";
+        m_pauseFlagPath     = appDir + "/pause.flag";
+        m_settingsFilePath  = appDir + "/user_settings.json";
+        m_historyFilePath   = appDir + "/history_daily.json";
+        m_engineExePath     = appDir + "/FocusGuard.exe";
     } else {
-        m_engineExePath = ws + "/core_engine/x64/Release/FocusGuard.exe";
+        // 워크스페이스 루트 자동 탐색 (개발 모드)
+        m_statsFilePath     = ws + "/core_engine/FocusGuard_stats.json";
+        m_whitelistFilePath = ws + "/core_engine/whitelist.json";
+        m_pauseFlagPath     = ws + "/core_engine/pause.flag";
+        m_settingsFilePath  = ws + "/qt_gui/user_settings.json";
+        m_historyFilePath   = ws + "/qt_gui/history_daily.json";
+
+        // 코어 엔진 실행 파일 경로 탐색 (Release 우선)
+        QString engineCandidate = ws + "/core_engine/x64/Release/FocusGuard.exe";
+        if (QFile::exists(engineCandidate)) {
+            m_engineExePath = engineCandidate;
+        } else {
+            m_engineExePath = ws + "/core_engine/x64/Debug/FocusGuard.exe";
+        }
     }
 
     qDebug() << "[BackendManager] workspace  =" << ws;
