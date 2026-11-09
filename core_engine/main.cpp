@@ -28,7 +28,9 @@ void cleanup_firewall() {
     static std::atomic<bool> cleaned(false);
     if (cleaned.exchange(true)) return;
     system("netsh advfirewall firewall delete rule name=\"Block_QUIC_UDP443\" >nul 2>&1");
-    std::cout << "[Info] QUIC 방화벽 차단 규칙을 해제했습니다." << std::endl;
+    system("netsh advfirewall firewall delete rule name=\"Block_FocusGuard_IPv6\" >nul 2>&1");
+    system("ipconfig /flushdns >nul 2>&1");
+    std::cout << "[Info] QUIC 및 IPv6 방화벽 차단 규칙을 해제했습니다." << std::endl;
 }
 
 // ── 엔진 정상 종료 처리 함수 ──
@@ -131,7 +133,9 @@ int main() {
     // [보안/차단 강화] QUIC 프로토콜(UDP 443) 원천 차단 방화벽 규칙 등록
     // ============================================================
     system("netsh advfirewall firewall add rule name=\"Block_QUIC_UDP443\" dir=out action=block protocol=UDP remoteport=443 >nul 2>&1");
-    std::cout << "[Info] QUIC (UDP 443) 차단 방화벽 규칙을 적용했습니다." << std::endl;
+    system("netsh advfirewall firewall add rule name=\"Block_FocusGuard_IPv6\" dir=out action=block protocol=TCP remoteport=80,443 remoteip=2000::/3 >nul 2>&1");
+    system("ipconfig /flushdns >nul 2>&1");
+    std::cout << "[Info] QUIC(UDP 443) 및 IPv6(TCP 80/443) 차단 방화벽 규칙 적용 및 DNS 플러시 완료." << std::endl;
 
     // 출력 블로킹(스레드 멈춤) 방지 함수 호출
     DisableConsoleQuickEdit();

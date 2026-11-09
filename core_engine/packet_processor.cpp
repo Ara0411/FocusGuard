@@ -97,6 +97,14 @@ static std::mutex g_whitelist_file_mtx;
 
 void add_to_whitelist_safe(const std::string& new_domain) {
     if (new_domain.empty()) return;
+    // 도파민/동영상 차단 대상 키워드가 포함된 도메인은 절대 화이트리스트에 자동 등록되지 않도록 방어
+    if (new_domain.find("youtube") != std::string::npos ||
+        new_domain.find("googlevideo") != std::string::npos ||
+        new_domain.find("ytimg") != std::string::npos ||
+        new_domain.find("ggpht") != std::string::npos ||
+        new_domain.find("youtu.be") != std::string::npos) {
+        return;
+    }
 
     // 1. 메모리 중복 체크 (화이트리스트뿐 아니라 블랙리스트도 검사)
     {
@@ -423,6 +431,38 @@ void consumer_func(pcap_t* adhandle) {
                     std::string queried_domain = extract_dns_query(dns_payload, dns_payload_len);
 
                     if (!queried_domain.empty()) {
+                        // ── 차단 도메인 DNS Sinkhole (NXDOMAIN 위조 응답 전송) ──
+                        // 브라우저의 HTTP/2 Connection Coalescing, IPv6 Fallback, QUIC 연결 시도를 원천 차단
+                        bool is_dns_blocked = false;
+                        {
+                            std::shared_lock<std::shared_mutex> r_lock(g_wl_mutex);
+                            for (const auto& b : blacklist_domains) {
+                                if (queried_domain == b) { is_dns_blocked = true; break; }
+                                std::string bl_suffix = "." + b;
+                                if (queried_domain.length() > bl_suffix.length() &&
+                                    queried_domain.compare(queried_domain.length() - bl_suffix.length(), bl_suffix.length(), bl_suffix) == 0) {
+                                    is_dns_blocked = true; break;
+                                }
+                            }
+                        }
+                        if (!is_dns_blocked) {
+                            if (queried_domain.find("youtube") != std::string::npos ||
+                                queried_domain.find("googlevideo") != std::string::npos ||
+                                queried_domain.find("ytimg") != std::string::npos ||
+                                queried_domain.find("ggpht") != std::string::npos ||
+                                queried_domain.find("youtu.be") != std::string::npos) {
+                                is_dns_blocked = true;
+                            }
+                        }
+
+                        if (is_dns_blocked) {
+                            queue_spoofed_dns_nxdomain(pkt_data, header->caplen);
+                            StatsLogger::GetInstance().LogBlockedConnection(queried_domain);
+                            std::cout << "\n[Thread " << std::this_thread::get_id() << "] [DNS SINKHOLE] ⛔ 차단 도메인 DNS 무효화 | "
+                                      << queried_domain << " -> NXDOMAIN 응답 전송" << std::endl;
+                            continue;
+                        }
+
                         std::cout << "\n[Thread " << std::this_thread::get_id() << "] [DNS Sniff] 🔍 "
                             << src_ip_str << " -> " << dst_ip_str
                             << " | 도메인: " << queried_domain << std::endl;
@@ -499,19 +539,25 @@ void consumer_func(pcap_t* adhandle) {
             continue;
         }
 
+        // ── SYN 패킷 처리 (새 연결 시도 감지: 이전 포트 재사용 캐시 완전 초기화) ──
+        if (tcp->flags & 0x02) {
+            {
+                std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
+                allowed_conns.erase(conn_id);
+                blocked_conns.erase(conn_id);
+                pending_conns[conn_id] = time(nullptr);
+            }
+            {
+                std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
+                g_reassembly_map.erase(conn_id);
+            }
+            continue; // SYN 패킷 자체는 핸드셰이크를 위해 통과시킴
+        }
+
         // ── 허용된 커넥션 목록 읽기 (shared_lock) ──
         {
             std::shared_lock<std::shared_mutex> r_lock(g_ip_mutex);
             if (allowed_conns.count(conn_id) > 0) continue; // 허용된 커넥션 → 즉시 통과
-        }
-
-        // ── SYN 패킷 처리 (새 연결 시도 감지) ──
-        if ((tcp->flags & 0x02) && !(tcp->flags & 0x10)) {
-            std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
-            if (blocked_conns.count(conn_id) == 0 && allowed_conns.count(conn_id) == 0) {
-                pending_conns[conn_id] = time(nullptr);
-            }
-            continue; // SYN 패킷 자체는 통과시킴
         }
 
         // ── 이미 차단된 커넥션이라면 즉시 RST 주입 ──
@@ -654,6 +700,16 @@ void consumer_func(pcap_t* adhandle) {
                     if (domain.length() > suffix.length() &&
                         domain.compare(domain.length() - suffix.length(), suffix.length(), suffix) == 0) {
                         is_blacklisted = true; break;
+                    }
+                }
+                // 도메인 내 핵심 도파민/유튜브 키워드 포함 시 무조건 블랙리스트 우선 적용 (예: youtubei.googleapis.com)
+                if (!is_blacklisted) {
+                    if (domain.find("youtube") != std::string::npos ||
+                        domain.find("googlevideo") != std::string::npos ||
+                        domain.find("ytimg") != std::string::npos ||
+                        domain.find("ggpht") != std::string::npos ||
+                        domain.find("youtu.be") != std::string::npos) {
+                        is_blacklisted = true;
                     }
                 }
                 

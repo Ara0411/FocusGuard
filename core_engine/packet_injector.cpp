@@ -150,6 +150,74 @@ void queue_spoofed_rst_packet(const u_char* orig_pkt, int caplen, const std::str
     g_outbound_queue.Push(RawPacket(spoofed_pkt_bwd, spoofed_pkt_len));
 }
 
+// DNS NXDOMAIN 패킷 위조 및 아웃바운드 큐 등록 함수
+// 차단 대상 도메인 질의에 대해 즉시 "존재하지 않는 도메인(NXDOMAIN)" 응답을 반환하여
+// 브라우저의 HTTP/2 커넥션 풀링(Coalescing), IPv6 Fallback, QUIC 연결 시도를 원천 차단
+void queue_spoofed_dns_nxdomain(const u_char* orig_pkt, int caplen) {
+    if (!orig_pkt) return;
+
+    int min_len = sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header) + sizeof(struct pkt_udp_header) + sizeof(struct pkt_dns_header);
+    if (caplen < min_len) return;
+
+    struct pkt_eth_header* orig_eth = (struct pkt_eth_header*)orig_pkt;
+    struct pkt_ip_header* orig_ip = (struct pkt_ip_header*)(orig_pkt + sizeof(struct pkt_eth_header));
+    int orig_ip_len = (orig_ip->ver_ihl & 0xf) * 4;
+    if (orig_ip_len < 20 || caplen < (int)(sizeof(struct pkt_eth_header) + orig_ip_len + sizeof(struct pkt_udp_header) + sizeof(struct pkt_dns_header))) return;
+
+    struct pkt_udp_header* orig_udp = (struct pkt_udp_header*)((u_char*)orig_ip + orig_ip_len);
+    int orig_udp_len = ntohs(orig_udp->len);
+    if (orig_udp_len < (int)(sizeof(struct pkt_udp_header) + sizeof(struct pkt_dns_header))) return;
+
+    const u_char* orig_dns_payload = (const u_char*)orig_udp + sizeof(struct pkt_udp_header);
+    int orig_dns_payload_len = orig_udp_len - sizeof(struct pkt_udp_header);
+    if (orig_dns_payload_len > 256) orig_dns_payload_len = 256;
+
+    int spoofed_pkt_len = sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header) + sizeof(struct pkt_udp_header) + orig_dns_payload_len;
+    if (spoofed_pkt_len > 512) return;
+
+    u_char spoofed_pkt[512] = {0};
+
+    struct pkt_eth_header* eth = (struct pkt_eth_header*)spoofed_pkt;
+    struct pkt_ip_header* ip = (struct pkt_ip_header*)(spoofed_pkt + sizeof(struct pkt_eth_header));
+    struct pkt_udp_header* udp = (struct pkt_udp_header*)(spoofed_pkt + sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header));
+    u_char* dns_resp = spoofed_pkt + sizeof(struct pkt_eth_header) + sizeof(struct pkt_ip_header) + sizeof(struct pkt_udp_header);
+
+    // [이더넷 헤더] Hairpinning (내 PC MAC으로 위장)
+    memcpy(&eth->src_mac, &orig_eth->src_mac, 6);
+    memcpy(&eth->dest_mac, &orig_eth->src_mac, 6);
+    eth->eth_type = orig_eth->eth_type;
+
+    // [IPv4 헤더] DNS 서버 -> 클라이언트로 위장
+    ip->ver_ihl = 0x45;
+    ip->tos = 0;
+    ip->tlen = htons(sizeof(struct pkt_ip_header) + sizeof(struct pkt_udp_header) + orig_dns_payload_len);
+    ip->identification = htons(12346);
+    ip->flags_fo = 0;
+    ip->ttl = 64;
+    ip->proto = 17; // UDP
+    ip->saddr = orig_ip->daddr;
+    ip->daddr = orig_ip->saddr;
+    ip->crc = 0;
+    ip->crc = calculate_checksum((unsigned short*)ip, sizeof(struct pkt_ip_header));
+
+    // [UDP 헤더] 포트 53 -> 클라이언트 질의 포트
+    udp->sport = orig_udp->dport; // 53
+    udp->dport = orig_udp->sport;
+    udp->len = htons(sizeof(struct pkt_udp_header) + orig_dns_payload_len);
+    udp->checksum = 0; // IPv4 UDP 체크섬 0 허용
+
+    // [DNS 페이로드 복사 및 NXDOMAIN 플래그 적용]
+    memcpy(dns_resp, orig_dns_payload, orig_dns_payload_len);
+    struct pkt_dns_header* resp_dns_hdr = (struct pkt_dns_header*)dns_resp;
+    // Flags: QR=1 (응답), Opcode=0, AA=1, TC=0, RD=1, RA=1, RCODE=3 (NXDOMAIN: Name Error)
+    resp_dns_hdr->flags = htons(0x8183);
+    resp_dns_hdr->answer_rrs = 0;
+    resp_dns_hdr->authority_rrs = 0;
+    resp_dns_hdr->additional_rrs = 0;
+
+    g_outbound_queue.Push(RawPacket(spoofed_pkt, spoofed_pkt_len));
+}
+
 // ICMP Destination Unreachable 패킷 위조 및 아웃바운드 큐 등록 함수
 void queue_spoofed_icmp_unreachable(const u_char* orig_pkt, int caplen) {
     if (!orig_pkt) return;

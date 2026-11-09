@@ -41,7 +41,7 @@ void watcher_func() {
             std::cout << "\n[Watcher] ☕ 휴식 모드 전환 감지: 패킷 차단 일시중지 (유튜브 등 모든 접속 허용)" << std::endl;
         }
 
-        // 휴식 → 집중 복귀 감지: 커넥션 캐시 전부 초기화
+        // 휴식 → 집중 복귀 감지: 커넥션 캐시 전부 초기화 및 DNS 플러시
         if (was_paused && !is_paused_now) {
             {
                 std::unique_lock<std::shared_mutex> w_lock(g_ip_mutex);
@@ -53,7 +53,8 @@ void watcher_func() {
                 std::lock_guard<std::mutex> r_lock(g_reassembly_mutex);
                 g_reassembly_map.clear();
             }
-            std::cout << "\n[Watcher] ▶ 집중 모드 복귀: 커넥션 캐시 초기화 완료. 차단 재개!" << std::endl;
+            system("ipconfig /flushdns >nul 2>&1");
+            std::cout << "\n[Watcher] ▶ 집중 모드 복귀: 커넥션 캐시 초기화 및 DNS 플러시 완료. 차단 재개!" << std::endl;
         }
 
         was_paused = is_paused_now;
