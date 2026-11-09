@@ -51,7 +51,6 @@ qt_add_qml_module(FocusNetGuardian
         pages/SitesPage.qml
         pages/AnalyticsPage.qml
         pages/SettingsPage.qml
-        pages/EngineLogPage.qml
 
         # Components
         components/Card.qml

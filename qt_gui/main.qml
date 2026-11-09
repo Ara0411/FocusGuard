@@ -355,7 +355,6 @@ ApplicationWindow {
         case 2:  return cmpSites
         case 3:  return cmpAnalytics
         case 4:  return cmpSettings
-        case 5:  return cmpEngineLog
         default: return cmpDashboard
         }
     }
@@ -426,7 +425,6 @@ ApplicationWindow {
                             ListElement { label: "사이트 관리"; glyph: "globe" }
                             ListElement { label: "집중 통계";   glyph: "bars" }
                             ListElement { label: "설정";       glyph: "gear" }
-                            ListElement { label: "엔진 콘솔";   glyph: "terminal" }
                         }
                         delegate: Rectangle {
                             id: navItem
@@ -572,7 +570,6 @@ ApplicationWindow {
     Component { id: cmpSites;     SitesPage {} }
     Component { id: cmpAnalytics; AnalyticsPage {} }
     Component { id: cmpSettings;  SettingsPage {} }
-    Component { id: cmpEngineLog; EngineLogPage {} }
 
     // 대시보드 사이트 등록 핸들러 (C++ 로 시그널 전달 지점)
     function registerSite(v) {
